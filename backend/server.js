@@ -1,5 +1,4 @@
 // backend/server.js
-
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -9,42 +8,33 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// --------- ENV + AWS CONFIG ---------
-const {
-  AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY,
-  AWS_REGION,
-  S3_BUCKET,
-} = process.env;
-
-if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY || !AWS_REGION || !S3_BUCKET) {
-  console.error("⚠️ Missing one of the required environment variables:");
-  console.error("   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET");
-  console.error("   Uploads and listing will fail until these are set.");
-}
+// ======= HARD-CODE YOUR BUCKET + REGION HERE FOR NOW =======
+const BUCKET_NAME = "my-doc-upload-app-bucket";   // e.g. "study-drive-notes"
+const BUCKET_REGION = "ap-south-2";      // e.g. "ap-south-1"
 
 aws.config.update({
-  accessKeyId: AWS_ACCESS_KEY_ID,
-  secretAccessKey: AWS_SECRET_ACCESS_KEY,
-  region: AWS_REGION,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,      // from env
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: BUCKET_REGION,
 });
 
 const S3 = new aws.S3();
+const S3_BUCKET = BUCKET_NAME;
+// ==========================================================
 
-// --------- MIDDLEWARE ---------
 app.use(
   cors({
-    origin: "*", // For production, change to your Netlify URL
+    origin: "*",
     methods: ["GET", "POST", "DELETE"],
   })
 );
 
-app.use(express.json()); // For parsing JSON bodies (used in delete endpoint)
+app.use(express.json());
 
-// Use memory storage so we can send the file buffer to S3
+// memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
 
 // --------- ROUTES ---------
