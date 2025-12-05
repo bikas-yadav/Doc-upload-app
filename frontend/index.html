@@ -3,30 +3,122 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Drive - Document Upload</title>
+  <title>My Study Drive</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div class="app-shell">
+    <!-- Top bar -->
+    <header class="top-bar">
+      <div class="brand">
+        <div class="brand-icon">SD</div>
+        <div>
+          <h1>My Study Drive</h1>
+          <p>Upload, organize & review your notes and PDFs</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="fileCount">0 files</span>
+        <span id="totalSize">0 KB</span>
+      </div>
+    </header>
 
-  <div class="container">
-    <h1>My Mini Drive</h1>
+    <main class="main-content">
+      <!-- Left column: upload + filters -->
+      <section class="left-panel">
+        <!-- Upload card -->
+        <div class="card upload-card">
+          <h2>Upload a File</h2>
+          <p class="muted">
+            Upload your notes, PDFs or images. They’ll be stored safely in your Study Drive.
+          </p>
+          <form id="uploadForm" class="upload-form">
+            <label for="fileInput" class="file-label">
+              <span>Select a file</span>
+              <span class="file-hint">PDF / Images / Docs</span>
+            </label>
+            <input type="file" id="fileInput" name="document" required />
+            <button type="submit">Upload</button>
+          </form>
+          <div id="status"></div>
+        </div>
 
-    <!-- Upload form -->
-    <form id="uploadForm" class="upload-form">
-      <label for="fileInput">Choose a file:</label>
-      <input type="file" id="fileInput" name="document" required />
-      <button type="submit">Upload</button>
-    </form>
+        <!-- Filters card -->
+        <div class="card filters-card">
+          <h3>Filter & Search</h3>
+          <div class="filters">
+            <div class="filter-group">
+              <label for="searchInput">Search by name</label>
+              <input
+                type="text"
+                id="searchInput"
+                placeholder="e.g. OS-notes, DBMS.pdf"
+              />
+            </div>
 
-    <!-- Status message -->
-    <div id="status"></div>
+            <div class="filter-group">
+              <label for="typeFilter">Type</label>
+              <select id="typeFilter">
+                <option value="all">All types</option>
+                <option value="pdf">PDFs</option>
+                <option value="image">Images</option>
+                <option value="doc">Documents</option>
+                <option value="other">Others</option>
+              </select>
+            </div>
 
-    <!-- File list section -->
-    <h2>Uploaded Files</h2>
-    <div id="fileList" class="file-list">
-      Loading files...
+            <div class="filter-group">
+              <label for="sortSelect">Sort by</label>
+              <select id="sortSelect">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="az">Name A → Z</option>
+                <option value="za">Name Z → A</option>
+                <option value="sizeAsc">Size small → large</option>
+                <option value="sizeDesc">Size large → small</option>
+              </select>
+            </div>
+
+            <div class="view-toggle-group">
+              <span>View:</span>
+              <button type="button" id="gridViewBtn" class="view-btn active">
+                Grid
+              </button>
+              <button type="button" id="listViewBtn" class="view-btn">
+                List
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right column: file list / drive view -->
+      <section class="right-panel card">
+        <div class="right-header">
+          <h2>Your Files</h2>
+          <p class="muted small">Click on a file to open it. PDFs and images can also be previewed.</p>
+        </div>
+
+        <div id="fileList" class="file-list">
+          Loading files...
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Preview modal -->
+  <div id="previewModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button id="closePreviewBtn" class="close-btn">&times;</button>
+      <div id="previewBody" class="preview-body">
+        <!-- Preview content injected by JS -->
+      </div>
     </div>
   </div>
+
+  <!-- Toast notification -->
+  <div id="toast" class="toast hidden"></div>
 
   <script src="app.js"></script>
 </body>

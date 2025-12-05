@@ -1,15 +1,71 @@
-// Use your deployed backend URL on Render
+// Backend URL
 const BACKEND_URL = "https://doc-upload-app.onrender.com";
 
+// DOM elements
 const form = document.getElementById("uploadForm");
 const statusDiv = document.getElementById("status");
 const fileListDiv = document.getElementById("fileList");
+const searchInput = document.getElementById("searchInput");
+const typeFilter = document.getElementById("typeFilter");
+const sortSelect = document.getElementById("sortSelect");
+const gridViewBtn = document.getElementById("gridViewBtn");
+const listViewBtn = document.getElementById("listViewBtn");
+const fileCountSpan = document.getElementById("fileCount");
+const totalSizeSpan = document.getElementById("totalSize");
+const previewModal = document.getElementById("previewModal");
+const previewBody = document.getElementById("previewBody");
+const closePreviewBtn = document.getElementById("closePreviewBtn");
+const toast = document.getElementById("toast");
 
-// -------- Load file list (Drive-style) --------
+// State
+let allFiles = [];
+let viewMode = "grid"; // "grid" or "list"
+
+// Helpers
+function showToast(message) {
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+  setTimeout(() => toast.classList.add("hidden"), 2500);
+}
+
+function formatSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(2)} MB`;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString();
+}
+
+function detectType(name) {
+  const lower = (name || "").toLowerCase();
+  if (lower.endsWith(".pdf")) return "pdf";
+  if (lower.match(/\.(png|jpe?g|gif|webp|svg)$/)) return "image";
+  if (lower.match(/\.(docx?|pptx?|xlsx?)$/)) return "doc";
+  return "other";
+}
+
+function getIconText(type) {
+  switch (type) {
+    case "pdf": return "PDF";
+    case "image": return "IMG";
+    case "doc": return "DOC";
+    default: return "FILE";
+  }
+}
+
+// Load file list
 async function loadFileList() {
   if (!fileListDiv) return;
 
-  fileListDiv.innerHTML = "Loading files...";
+  fileListDiv.textContent = "Loading files...";
 
   try {
     const res = await fetch(`${BACKEND_URL}/files`);
@@ -27,38 +83,126 @@ async function loadFileList() {
       throw new Error(data.message || "Failed to load files");
     }
 
-    const files = data.files || [];
+    const files = (data.files || []).map(f => ({
+      ...f,
+      type: detectType(f.name),
+    }));
 
-    if (!files.length) {
-      fileListDiv.textContent = "No files uploaded yet.";
-      return;
-    }
-
-    // Build a simple list
-    fileListDiv.innerHTML = files
-      .map(
-        (file) => `
-        <div class="file-item">
-          <a href="${file.url}" target="_blank" rel="noopener noreferrer">
-            ${file.name}
-          </a>
-          <span class="file-meta">
-            ${ (file.size != null ? (file.size / 1024).toFixed(1) + " KB · " : "") }
-            ${ file.lastModified ? new Date(file.lastModified).toLocaleString() : "" }
-          </span>
-        </div>
-      `
-      )
-      .join("");
+    allFiles = files;
+    updateStats();
+    renderFileList();
   } catch (err) {
     console.error("Error loading file list:", err);
     fileListDiv.textContent = "Failed to load files.";
   }
 }
 
-// -------- Handle file upload --------
+function updateStats() {
+  const count = allFiles.length;
+  const totalBytes = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  if (fileCountSpan) fileCountSpan.textContent = `${count} file${count === 1 ? "" : "s"}`;
+  if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
+}
+
+// Render file list based on filters & view mode
+function renderFileList() {
+  if (!fileListDiv) return;
+
+  if (!allFiles.length) {
+    fileListDiv.textContent = "No files uploaded yet.";
+    return;
+  }
+
+  const query = (searchInput?.value || "").toLowerCase().trim();
+  const type = typeFilter?.value || "all";
+  const sort = sortSelect?.value || "newest";
+
+  let files = [...allFiles];
+
+  // Filter by type
+  if (type !== "all") {
+    files = files.filter(f => f.type === type);
+  }
+
+  // Filter by search
+  if (query) {
+    files = files.filter(f => (f.name || "").toLowerCase().includes(query));
+  }
+
+  // Sort
+  files.sort((a, b) => {
+    const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+    const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+    const sa = a.size || 0;
+    const sb = b.size || 0;
+    const na = (a.name || "").toLowerCase();
+    const nb = (b.name || "").toLowerCase();
+
+    switch (sort) {
+      case "oldest": return da - db;
+      case "az": return na.localeCompare(nb);
+      case "za": return nb.localeCompare(na);
+      case "sizeAsc": return sa - sb;
+      case "sizeDesc": return sb - sa;
+      case "newest":
+      default: return db - da;
+    }
+  });
+
+  // Set view mode classes
+  fileListDiv.className = `file-list ${viewMode}`;
+
+  if (!files.length) {
+    fileListDiv.textContent = "No files match your filters.";
+    return;
+  }
+
+  fileListDiv.innerHTML = files.map(file => {
+    const typeClass = file.type || "other";
+    const iconText = getIconText(typeClass);
+    const sizeText = formatSize(file.size);
+    const dateText = formatDate(file.lastModified);
+
+    return `
+      <div class="file-item" data-url="${file.url}" data-type="${typeClass}">
+        <div class="file-icon ${typeClass}">${iconText}</div>
+        <div class="file-main">
+          <p class="file-name" title="${file.name || ""}">${file.name || "Untitled file"}</p>
+          <p class="file-meta">
+            ${sizeText || ""}${sizeText && dateText ? " · " : ""}${dateText || ""}
+          </p>
+        </div>
+        <div class="file-actions">
+          <button type="button" class="preview-btn">Preview</button>
+          <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Attach click handlers for preview buttons and card clicks
+  fileListDiv.querySelectorAll(".file-item").forEach(item => {
+    const url = item.getAttribute("data-url");
+    const type = item.getAttribute("data-type");
+    const previewBtn = item.querySelector(".preview-btn");
+
+    previewBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openPreview(url, type);
+    });
+
+    item.addEventListener("click", (e) => {
+      if ((e.target).closest(".file-actions")) return;
+      openPreview(url, type);
+    });
+  });
+}
+
+// Upload handler
 async function handleUpload(e) {
   e.preventDefault();
+
+  if (!statusDiv) return;
 
   statusDiv.textContent = "";
   statusDiv.className = "";
@@ -71,11 +215,9 @@ async function handleUpload(e) {
   }
 
   const formData = new FormData();
-  // "document" must match upload.single("document") in server.js
   formData.append("document", fileInput.files[0]);
 
   statusDiv.textContent = "Uploading...";
-
   try {
     const res = await fetch(`${BACKEND_URL}/upload`, {
       method: "POST",
@@ -95,36 +237,93 @@ async function handleUpload(e) {
     if (!res.ok) {
       statusDiv.textContent = data.message || "Upload failed.";
       statusDiv.classList.add("error");
+      showToast("Upload failed");
       return;
     }
 
-    // If backend sends file.url, show a link
-    if (data.file && data.file.url) {
-      statusDiv.innerHTML = `
-        <p>${data.message || "File uploaded successfully!"}</p>
-        <p><strong>File:</strong> ${data.file.originalName || data.file.key || ""}</p>
-        <p><a href="${data.file.url}" target="_blank" rel="noopener noreferrer">Open uploaded file</a></p>
-      `;
-    } else {
-      statusDiv.textContent = data.message || "File uploaded successfully!";
-    }
-
+    statusDiv.innerHTML = `
+      <p>${data.message || "File uploaded successfully!"}</p>
+      ${data.file && data.file.url ? `<p><a href="${data.file.url}" target="_blank" rel="noopener noreferrer">Open uploaded file</a></p>` : ""}
+    `;
     statusDiv.classList.add("success");
-    form.reset();
+    fileInput.value = "";
+    showToast("File uploaded ✅");
 
-    // Reload the file list after successful upload
     await loadFileList();
   } catch (err) {
     console.error("Upload error:", err);
     statusDiv.textContent = "Error uploading file. Check console for details.";
     statusDiv.classList.add("error");
+    showToast("Upload error");
   }
 }
 
-// -------- Init --------
-document.addEventListener("DOMContentLoaded", () => {
-  if (form) {
-    form.addEventListener("submit", handleUpload);
+// Preview modal
+function openPreview(url, type) {
+  if (!previewModal || !previewBody) {
+    window.open(url, "_blank");
+    return;
   }
+
+  previewBody.innerHTML = "";
+
+  if (type === "pdf") {
+    previewBody.innerHTML = `
+      <iframe src="${url}" title="PDF preview"></iframe>
+    `;
+  } else if (type === "image") {
+    previewBody.innerHTML = `
+      <img src="${url}" alt="Image preview" />
+    `;
+  } else {
+    previewBody.innerHTML = `
+      <p>This file type cannot be previewed here. You can open it in a new tab:</p>
+      <p><a href="${url}" target="_blank" rel="noopener noreferrer">Open file</a></p>
+    `;
+  }
+
+  previewModal.classList.remove("hidden");
+}
+
+function closePreview() {
+  if (!previewModal || !previewBody) return;
+  previewModal.classList.add("hidden");
+  previewBody.innerHTML = "";
+}
+
+// Init
+document.addEventListener("DOMContentLoaded", () => {
+  if (form) form.addEventListener("submit", handleUpload);
+  if (searchInput) searchInput.addEventListener("input", () => renderFileList());
+  if (typeFilter) typeFilter.addEventListener("change", () => renderFileList());
+  if (sortSelect) sortSelect.addEventListener("change", () => renderFileList());
+
+  if (gridViewBtn && listViewBtn) {
+    gridViewBtn.addEventListener("click", () => {
+      viewMode = "grid";
+      gridViewBtn.classList.add("active");
+      listViewBtn.classList.remove("active");
+      renderFileList();
+    });
+
+    listViewBtn.addEventListener("click", () => {
+      viewMode = "list";
+      listViewBtn.classList.add("active");
+      gridViewBtn.classList.remove("active");
+      renderFileList();
+    });
+  }
+
+  if (closePreviewBtn) {
+    closePreviewBtn.addEventListener("click", closePreview);
+  }
+  if (previewModal) {
+    previewModal.addEventListener("click", (e) => {
+      if (e.target === previewModal || e.target.classList.contains("modal-backdrop")) {
+        closePreview();
+      }
+    });
+  }
+
   loadFileList();
 });
