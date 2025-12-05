@@ -63,8 +63,6 @@ app.post("/upload", upload.single("document"), (req, res) => {
   }
 
   const file = req.file;
-
-  // create a unique key inside the bucket
   const key = `uploads/${Date.now()}-${file.originalname}`;
 
   const params = {
@@ -72,27 +70,34 @@ app.post("/upload", upload.single("document"), (req, res) => {
     Key: key,
     Body: file.buffer,
     ContentType: file.mimetype,
-    ACL: "public-read", // public URL
+    ACL: "public-read",
   };
+
+  console.log("Uploading to S3 with params:", {
+    Bucket: params.Bucket,
+    Key: params.Key,
+    ContentType: params.ContentType,
+  });
 
   s3.upload(params, (err, data) => {
     if (err) {
       console.error("S3 upload error:", err);
       return res.status(500).json({
         message: "Failed to upload to S3",
-        error: err.message,
+        error: err.message,          // 👈 important
+        code: err.code || null,      // 👈 optional, but helpful
       });
     }
 
-    // success
     return res.json({
       message: "File uploaded successfully to S3!",
-      fileUrl: data.Location, // direct URL to the file
+      fileUrl: data.Location,
       key: data.Key,
       bucket: data.Bucket,
     });
   });
 });
+
 
 // ==========================
 //  ERROR HANDLER
