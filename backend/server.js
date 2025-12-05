@@ -70,7 +70,7 @@ app.post("/upload", upload.single("document"), (req, res) => {
     Key: key,
     Body: file.buffer,
     ContentType: file.mimetype,
-    //ACL: "public-read",
+    // ACL removed because bucket does not allow ACLs
   };
 
   console.log("Uploading to S3 with params:", {
@@ -84,8 +84,8 @@ app.post("/upload", upload.single("document"), (req, res) => {
       console.error("S3 upload error:", err);
       return res.status(500).json({
         message: "Failed to upload to S3",
-        error: err.message,          // 👈 important
-        code: err.code || null,      // 👈 optional, but helpful
+        error: err.message,
+        code: err.code || null,
       });
     }
 
