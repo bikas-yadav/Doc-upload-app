@@ -43,11 +43,16 @@ form.addEventListener("submit", async (e) => {
       data = { message: rawText };
     }
 
-    if (!res.ok) {
-      statusDiv.textContent = data.message || "Upload failed.";
-      statusDiv.classList.add("error");
-      return;
-    }
+if (!res.ok) {
+  const msgParts = [];
+  if (data.message) msgParts.push(data.message);
+  if (data.error) msgParts.push(`Details: ${data.error}`);
+  if (data.code) msgParts.push(`Code: ${data.code}`);
+
+  statusDiv.textContent = msgParts.join(" | ") || "Upload failed.";
+  statusDiv.classList.add("error");
+  return;
+}
 
     // ✅ Success – show message + filename + S3 link (if present)
     if (data.fileUrl) {
