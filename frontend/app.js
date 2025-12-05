@@ -1,13 +1,12 @@
-// Change this later to your deployed backend URL
-// const BACKEND_URL = "http://localhost:4000";
-const BACKEND_URL = "https://doc-upload-backend.onrender.com"; // <- your Render URL
-
+// Use your deployed backend URL on Render
+const BACKEND_URL = "https://doc-upload-app.onrender.com";
 
 const form = document.getElementById("uploadForm");
 const statusDiv = document.getElementById("status");
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+
   statusDiv.textContent = "";
   statusDiv.className = "";
 
@@ -19,6 +18,7 @@ form.addEventListener("submit", async (e) => {
   }
 
   const formData = new FormData();
+  // "document" must match upload.single("document") in server.js
   formData.append("document", fileInput.files[0]);
 
   statusDiv.textContent = "Uploading...";
@@ -29,17 +29,30 @@ form.addEventListener("submit", async (e) => {
       body: formData,
     });
 
-    if (!res.ok) {
-      throw new Error("Upload failed");
+    // Read response as text first (in case it's not valid JSON)
+    const rawText = await res.text();
+    console.log("Raw response from backend:", rawText);
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { message: rawText };
     }
 
-    const data = await res.json();
+    if (!res.ok) {
+      statusDiv.textContent = data.message || "Upload failed.";
+      statusDiv.classList.add("error");
+      return;
+    }
+
+    // Success
     statusDiv.textContent = data.message || "File uploaded successfully!";
     statusDiv.classList.add("success");
     form.reset();
   } catch (err) {
-    console.error(err);
-    statusDiv.textContent = "Error uploading file.";
+    console.error("Upload error:", err);
+    statusDiv.textContent = "Error uploading file. Check console for details.";
     statusDiv.classList.add("error");
   }
 });

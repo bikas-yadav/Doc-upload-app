@@ -1,61 +1,70 @@
+/* Reset & Base */
 * {
   box-sizing: border-box;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 body {
   margin: 0;
   padding: 0;
-  background: #f5f5f5;
+  background: #f4f4f4;
 }
 
+/* Container */
 .container {
-  max-width: 500px;
+  max-width: 420px;
   margin: 60px auto;
-  padding: 30px 25px;
+  padding: 25px;
   background: #ffffff;
   border-radius: 10px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+  text-align: center;
 }
 
 h1 {
-  text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-label {
-  display: block;
-  margin-bottom: 8px;
-  font-weight: 600;
-}
-
+/* File input */
 input[type="file"] {
   width: 100%;
-  margin-bottom: 16px;
+  margin-top: 10px;
+  margin-bottom: 20px;
 }
 
+/* Upload button */
 button {
-  display: inline-block;
-  padding: 10px 18px;
+  padding: 10px 20px;
   border: none;
   border-radius: 6px;
-  cursor: pointer;
   background: #2563eb;
   color: white;
-  font-weight: 600;
+  font-weight: bold;
+  cursor: pointer;
+  width: 100%;
 }
 
 button:hover {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
+/* Status messages */
 #status {
-  margin-top: 16px;
-  font-size: 0.95rem;
+  margin-top: 20px;
+  padding: 10px;
+  font-size: 14px;
 }
+
 #status.error {
   color: #b91c1c;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
 }
+
 #status.success {
-  color: #15803d;
+  color: #065f46;
+  background: #d1fae5;
+  border: 1px solid #6ee7b7;
+  border-radius: 6px;
 }
