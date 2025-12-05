@@ -38,6 +38,18 @@
               <span class="file-hint">PDF / Images / Docs</span>
             </label>
             <input type="file" id="fileInput" name="document" required />
+
+            <!-- 🔹 Folder input -->
+            <label for="folderInput" class="file-label">
+              <span>Folder (optional)</span>
+              <span class="file-hint">e.g. os, dbms, personal</span>
+            </label>
+            <input
+              type="text"
+              id="folderInput"
+              placeholder="If empty, goes to 'root'"
+            />
+
             <button type="submit">Upload</button>
           </form>
           <div id="status"></div>
@@ -54,6 +66,13 @@
                 id="searchInput"
                 placeholder="e.g. OS-notes, DBMS.pdf"
               />
+            </div>
+
+            <div class="filter-group">
+              <label for="folderFilter">Folder</label>
+              <select id="folderFilter">
+                <option value="all">All folders</option>
+              </select>
             </div>
 
             <div class="filter-group">
@@ -96,7 +115,9 @@
       <section class="right-panel card">
         <div class="right-header">
           <h2>Your Files</h2>
-          <p class="muted small">Click on a file to open it. PDFs and images can also be previewed.</p>
+          <p class="muted small">
+            Click on a file to open it. PDFs and images can also be previewed.
+          </p>
         </div>
 
         <div id="fileList" class="file-list">

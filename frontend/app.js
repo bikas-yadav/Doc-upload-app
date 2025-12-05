@@ -16,6 +16,8 @@ const previewModal = document.getElementById("previewModal");
 const previewBody = document.getElementById("previewBody");
 const closePreviewBtn = document.getElementById("closePreviewBtn");
 const toast = document.getElementById("toast");
+const folderInput = document.getElementById("folderInput");
+const folderFilter = document.getElementById("folderFilter");
 
 // State
 let allFiles = [];
@@ -61,6 +63,21 @@ function getIconText(type) {
   }
 }
 
+function updateStats() {
+  const count = allFiles.length;
+  const totalBytes = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  if (fileCountSpan) fileCountSpan.textContent = `${count} file${count === 1 ? "" : "s"}`;
+  if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
+}
+
+function updateFolderFilterOptions() {
+  if (!folderFilter) return;
+  const folders = [...new Set(allFiles.map(f => f.folder || "root"))].sort();
+  folderFilter.innerHTML =
+    '<option value="all">All folders</option>' +
+    folders.map(f => `<option value="${f}">${f}</option>`).join("");
+}
+
 // Load file list
 async function loadFileList() {
   if (!fileListDiv) return;
@@ -86,22 +103,17 @@ async function loadFileList() {
     const files = (data.files || []).map(f => ({
       ...f,
       type: detectType(f.name),
+      folder: f.folder || "root",
     }));
 
     allFiles = files;
     updateStats();
+    updateFolderFilterOptions();
     renderFileList();
   } catch (err) {
     console.error("Error loading file list:", err);
     fileListDiv.textContent = "Failed to load files.";
   }
-}
-
-function updateStats() {
-  const count = allFiles.length;
-  const totalBytes = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
-  if (fileCountSpan) fileCountSpan.textContent = `${count} file${count === 1 ? "" : "s"}`;
-  if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
 }
 
 // Render file list based on filters & view mode
@@ -116,15 +128,21 @@ function renderFileList() {
   const query = (searchInput?.value || "").toLowerCase().trim();
   const type = typeFilter?.value || "all";
   const sort = sortSelect?.value || "newest";
+  const folder = folderFilter?.value || "all";
 
   let files = [...allFiles];
+
+  // Folder filter
+  if (folder !== "all") {
+    files = files.filter(f => (f.folder || "root") === folder);
+  }
 
   // Filter by type
   if (type !== "all") {
     files = files.filter(f => f.type === type);
   }
 
-  // Filter by search
+  // Search
   if (query) {
     files = files.filter(f => (f.name || "").toLowerCase().includes(query));
   }
@@ -149,7 +167,6 @@ function renderFileList() {
     }
   });
 
-  // Set view mode classes
   fileListDiv.className = `file-list ${viewMode}`;
 
   if (!files.length) {
@@ -162,33 +179,45 @@ function renderFileList() {
     const iconText = getIconText(typeClass);
     const sizeText = formatSize(file.size);
     const dateText = formatDate(file.lastModified);
+    const folderText = file.folder || "root";
 
     return `
-      <div class="file-item" data-url="${file.url}" data-type="${typeClass}">
+      <div class="file-item" data-url="${file.url}" data-type="${typeClass}" data-key="${file.key}">
         <div class="file-icon ${typeClass}">${iconText}</div>
         <div class="file-main">
           <p class="file-name" title="${file.name || ""}">${file.name || "Untitled file"}</p>
           <p class="file-meta">
+            ${folderText ? "[" + folderText + "] · " : ""}
             ${sizeText || ""}${sizeText && dateText ? " · " : ""}${dateText || ""}
           </p>
         </div>
         <div class="file-actions">
           <button type="button" class="preview-btn">Preview</button>
           <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
+          <button type="button" class="delete-btn">Delete</button>
         </div>
       </div>
     `;
   }).join("");
 
-  // Attach click handlers for preview buttons and card clicks
+  // Attach event handlers
   fileListDiv.querySelectorAll(".file-item").forEach(item => {
     const url = item.getAttribute("data-url");
     const type = item.getAttribute("data-type");
+    const key = item.getAttribute("data-key");
     const previewBtn = item.querySelector(".preview-btn");
+    const deleteBtn = item.querySelector(".delete-btn");
 
     previewBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       openPreview(url, type);
+    });
+
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (confirm("Are you sure you want to delete this file?")) {
+        await deleteFile(key);
+      }
     });
 
     item.addEventListener("click", (e) => {
@@ -196,6 +225,40 @@ function renderFileList() {
       openPreview(url, type);
     });
   });
+}
+
+// Delete file
+async function deleteFile(key) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/files`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key }),
+    });
+
+    const text = await res.text();
+    console.log("Raw DELETE /files response:", text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+
+    if (!res.ok) {
+      showToast(data.message || "Failed to delete file");
+      return;
+    }
+
+    showToast("File deleted ✅");
+    await loadFileList();
+  } catch (err) {
+    console.error("Delete error:", err);
+    showToast("Error deleting file");
+  }
 }
 
 // Upload handler
@@ -216,6 +279,11 @@ async function handleUpload(e) {
 
   const formData = new FormData();
   formData.append("document", fileInput.files[0]);
+
+  // 🔹 Folder field
+  if (folderInput && folderInput.value.trim()) {
+    formData.append("folder", folderInput.value.trim());
+  }
 
   statusDiv.textContent = "Uploading...";
   try {
@@ -247,6 +315,7 @@ async function handleUpload(e) {
     `;
     statusDiv.classList.add("success");
     fileInput.value = "";
+    if (folderInput) folderInput.value = "";
     showToast("File uploaded ✅");
 
     await loadFileList();
@@ -268,13 +337,9 @@ function openPreview(url, type) {
   previewBody.innerHTML = "";
 
   if (type === "pdf") {
-    previewBody.innerHTML = `
-      <iframe src="${url}" title="PDF preview"></iframe>
-    `;
+    previewBody.innerHTML = `<iframe src="${url}" title="PDF preview"></iframe>`;
   } else if (type === "image") {
-    previewBody.innerHTML = `
-      <img src="${url}" alt="Image preview" />
-    `;
+    previewBody.innerHTML = `<img src="${url}" alt="Image preview" />`;
   } else {
     previewBody.innerHTML = `
       <p>This file type cannot be previewed here. You can open it in a new tab:</p>
@@ -294,9 +359,10 @@ function closePreview() {
 // Init
 document.addEventListener("DOMContentLoaded", () => {
   if (form) form.addEventListener("submit", handleUpload);
-  if (searchInput) searchInput.addEventListener("input", () => renderFileList());
-  if (typeFilter) typeFilter.addEventListener("change", () => renderFileList());
-  if (sortSelect) sortSelect.addEventListener("change", () => renderFileList());
+  if (searchInput) searchInput.addEventListener("input", renderFileList);
+  if (typeFilter) typeFilter.addEventListener("change", renderFileList);
+  if (sortSelect) sortSelect.addEventListener("change", renderFileList);
+  if (folderFilter) folderFilter.addEventListener("change", renderFileList);
 
   if (gridViewBtn && listViewBtn) {
     gridViewBtn.addEventListener("click", () => {
