@@ -70,7 +70,7 @@ app.post("/upload", upload.single("document"), (req, res) => {
     Key: key,
     Body: file.buffer,
     ContentType: file.mimetype,
-    ACL: "public-read",
+    //ACL: "public-read",
   };
 
   console.log("Uploading to S3 with params:", {
