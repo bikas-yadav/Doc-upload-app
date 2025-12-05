@@ -3,23 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Document Upload</title>
+  <title>My Drive - Document Upload</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
   <div class="container">
-    <h1>Document Upload</h1>
-    <p class="subtitle">Upload your PDF, DOC, or any file and get a sharable link.</p>
+    <h1>My Mini Drive</h1>
 
-    <form id="uploadForm">
+    <!-- Upload form -->
+    <form id="uploadForm" class="upload-form">
       <label for="fileInput">Choose a file:</label>
       <input type="file" id="fileInput" name="document" required />
-
       <button type="submit">Upload</button>
     </form>
 
+    <!-- Status message -->
     <div id="status"></div>
+
+    <!-- File list section -->
+    <h2>Uploaded Files</h2>
+    <div id="fileList" class="file-list">
+      Loading files...
+    </div>
   </div>
 
   <script src="app.js"></script>
