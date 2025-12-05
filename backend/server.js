@@ -61,22 +61,25 @@ app.post("/upload", upload.single("document"), async (req, res) => {
     const baseName = path.basename(originalName, ext).replace(/\s+/g, "_");
     const timestamp = Date.now();
 
-    // Store everything under "uploads/" folder
-    const key = `uploads/${baseName}-${timestamp}${ext}`;
+    // 🔹 Folder from form (optional)
+    const rawFolder = (req.body && req.body.folder ? req.body.folder : "").trim();
+    let folderSafe = rawFolder || "root";
+    // make folder name safe: only letters, numbers, underscore, dash
+    folderSafe = folderSafe.replace(/[^\w\-]/g, "_").toLowerCase();
+
+    // Store under uploads/<folder>/
+    const key = `uploads/${folderSafe}/${baseName}-${timestamp}${ext}`;
 
     const params = {
       Bucket: S3_BUCKET,
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
-      // If you want them NOT public, remove ACL and always use signed URLs.
-      ACL: "private",
+      ACL: "private", // we use signed URLs
     };
 
-    // Upload to S3
     const result = await S3.upload(params).promise();
 
-    // Generate a signed URL for preview/open (1 hour)
     const signedUrl = S3.getSignedUrl("getObject", {
       Bucket: S3_BUCKET,
       Key: key,
@@ -89,9 +92,8 @@ app.post("/upload", upload.single("document"), async (req, res) => {
         originalName,
         key,
         size: file.size,
-        // Direct S3 URL (may require bucket to be public if you use this)
+        folder: folderSafe,
         location: result.Location,
-        // Signed URL used by frontend
         url: signedUrl,
       },
     });
@@ -104,7 +106,7 @@ app.post("/upload", upload.single("document"), async (req, res) => {
   }
 });
 
-// List files endpoint: returns array of { name, key, size, lastModified, url }
+// List files endpoint: returns array of { name, key, size, lastModified, url, folder }
 app.get("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
@@ -113,23 +115,33 @@ app.get("/files", async (req, res) => {
 
     const params = {
       Bucket: S3_BUCKET,
-      Prefix: "uploads/", // Only list files in uploads/ folder
+      Prefix: "uploads/",
       MaxKeys: 1000,
     };
 
     const data = await S3.listObjectsV2(params).promise();
 
     const files = (data.Contents || [])
-      // skip the folder itself if it appears as "uploads/"
-      .filter((obj) => obj.Key !== "uploads/")
+      .filter((obj) => obj.Key !== "uploads/") // skip the folder itself
       .map((obj) => {
-        const key = obj.Key;
-        const name = path.basename(key);
+        const key = obj.Key; // e.g. "uploads/os/os-notes-1234.pdf"
+
+        // Remove "uploads/" prefix
+        let relative = key.startsWith("uploads/") ? key.slice("uploads/".length) : key;
+
+        const parts = relative.split("/");
+        let folder = "root";
+        let name = relative;
+
+        if (parts.length > 1) {
+          folder = parts[0];             // e.g. "os"
+          name = parts.slice(1).join("/"); // e.g. "os-notes-1234.pdf"
+        }
 
         const signedUrl = S3.getSignedUrl("getObject", {
           Bucket: S3_BUCKET,
           Key: key,
-          Expires: 60 * 60, // 1 hour
+          Expires: 60 * 60,
         });
 
         return {
@@ -138,6 +150,7 @@ app.get("/files", async (req, res) => {
           size: obj.Size,
           lastModified: obj.LastModified,
           url: signedUrl,
+          folder,
         };
       });
 
