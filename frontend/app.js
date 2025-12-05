@@ -1,5 +1,7 @@
 // Change this later to your deployed backend URL
-const BACKEND_URL = "http://localhost:4000";
+// const BACKEND_URL = "http://localhost:4000";
+const BACKEND_URL = "https://doc-upload-backend.onrender.com"; // <- your Render URL
+
 
 const form = document.getElementById("uploadForm");
 const statusDiv = document.getElementById("status");
