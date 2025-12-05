@@ -1,4 +1,4 @@
-// Use your deployed backend URL on Render
+// Backend URL on Render
 const BACKEND_URL = "https://doc-upload-app.onrender.com";
 
 const form = document.getElementById("uploadForm");
@@ -7,6 +7,7 @@ const statusDiv = document.getElementById("status");
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
+  // Reset status
   statusDiv.textContent = "";
   statusDiv.className = "";
 
@@ -17,11 +18,13 @@ form.addEventListener("submit", async (e) => {
     return;
   }
 
+  const file = fileInput.files[0];
   const formData = new FormData();
   // "document" must match upload.single("document") in server.js
-  formData.append("document", fileInput.files[0]);
+  formData.append("document", file);
 
   statusDiv.textContent = "Uploading...";
+  statusDiv.className = "";
 
   try {
     const res = await fetch(`${BACKEND_URL}/upload`, {
@@ -29,7 +32,7 @@ form.addEventListener("submit", async (e) => {
       body: formData,
     });
 
-    // Read response as text first (in case it's not valid JSON)
+    // Read raw text so we can debug if JSON fails
     const rawText = await res.text();
     console.log("Raw response from backend:", rawText);
 
@@ -46,8 +49,22 @@ form.addEventListener("submit", async (e) => {
       return;
     }
 
-    // Success
-    statusDiv.textContent = data.message || "File uploaded successfully!";
+    // ✅ Success – show message + filename + S3 link (if present)
+    if (data.fileUrl) {
+      statusDiv.innerHTML = `
+        <p>${data.message || "File uploaded successfully!"}</p>
+        <p><strong>File name:</strong> ${file.name}</p>
+        <p>
+          <strong>Link:</strong>
+          <a href="${data.fileUrl}" target="_blank" rel="noopener noreferrer">
+            ${data.fileUrl}
+          </a>
+        </p>
+      `;
+    } else {
+      statusDiv.textContent = data.message || "File uploaded successfully!";
+    }
+
     statusDiv.classList.add("success");
     form.reset();
   } catch (err) {
