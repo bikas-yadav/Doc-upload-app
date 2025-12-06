@@ -1,31 +1,56 @@
-// Backend URL
-const BACKEND_URL = "https://doc-upload-app.onrender.com"; // keep as you had
+// ===== Config =====
+const BACKEND_URL = "https://doc-upload-app.onrender.com"; // same backend
 
-// DOM elements
+// ===== DOM =====
 const form = document.getElementById("uploadForm");
 const statusDiv = document.getElementById("status");
 const fileListDiv = document.getElementById("fileList");
 const searchInput = document.getElementById("searchInput");
-const typeFilter = document.getElementById("typeFilter");
+const typeFilter = document.getElementById("typeFilter"); // optional (we also have chips)
 const sortSelect = document.getElementById("sortSelect");
 const gridViewBtn = document.getElementById("gridViewBtn");
 const listViewBtn = document.getElementById("listViewBtn");
 const fileCountSpan = document.getElementById("fileCount");
 const totalSizeSpan = document.getElementById("totalSize");
+const totalSizeSidebarSpan = document.getElementById("totalSizeSidebar");
+const storageBarFill = document.getElementById("storageBarFill");
+const storagePercentLabel = document.getElementById("storagePercentLabel");
 const previewModal = document.getElementById("previewModal");
 const previewBody = document.getElementById("previewBody");
 const closePreviewBtn = document.getElementById("closePreviewBtn");
 const toast = document.getElementById("toast");
 const folderInput = document.getElementById("folderInput");
 const folderFilter = document.getElementById("folderFilter");
-const leftPanel = document.getElementById("leftPanel");
-const mobileFiltersToggle = document.getElementById("mobileFiltersToggle");
+const chips = document.querySelectorAll(".chip");
+const dropZone = document.getElementById("dropZone");
+const fileInput = document.getElementById("fileInput");
+const uploadQueue = document.getElementById("uploadQueue");
+const uploadQueueList = document.getElementById("uploadQueueList");
+const clearQueueBtn = document.getElementById("clearQueueBtn");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const navFavorites = document.getElementById("navFavorites");
 
-// State
+// ===== State =====
 let allFiles = [];
-let viewMode = "grid"; // "grid" or "list"
+let viewMode = localStorage.getItem("studyDriveViewMode") || "grid";
+let activeChip = localStorage.getItem("studyDriveActiveChip") || "all";
+let favoriteKeys = loadFavorites();
 
 // ===== Helpers =====
+function loadFavorites() {
+  try {
+    const raw = localStorage.getItem("studyDriveFavorites");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites() {
+  localStorage.setItem("studyDriveFavorites", JSON.stringify(favoriteKeys));
+}
+
 function showToast(message) {
   if (!toast) return;
   toast.textContent = message;
@@ -74,8 +99,23 @@ function getIconText(type) {
 function updateStats() {
   const count = allFiles.length;
   const totalBytes = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  const storageLimitBytes = 1024 * 1024 * 1024; // 1 GB (fake limit for UI)
+
   if (fileCountSpan) fileCountSpan.textContent = `${count}`;
   if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
+  if (totalSizeSidebarSpan)
+    totalSizeSidebarSpan.textContent = formatSize(totalBytes) || "0 KB";
+
+  const percentage = Math.min(
+    100,
+    Math.round((totalBytes / storageLimitBytes) * 100)
+  );
+  if (storageBarFill) {
+    storageBarFill.style.width = `${percentage}%`;
+  }
+  if (storagePercentLabel) {
+    storagePercentLabel.textContent = `${percentage}%`;
+  }
 }
 
 function updateFolderFilterOptions() {
@@ -86,11 +126,10 @@ function updateFolderFilterOptions() {
     folders.map((f) => `<option value="${f}">${f}</option>`).join("");
 }
 
-// ===== API calls =====
+// ===== API: load/delete =====
 async function loadFileList() {
   if (!fileListDiv) return;
 
-  // show skeleton/loading state
   fileListDiv.classList.add("file-list--loading");
   fileListDiv.innerHTML = `
     <div class="skeleton-list">
@@ -160,6 +199,10 @@ async function deleteFile(key) {
       return;
     }
 
+    // Remove from favorites if present
+    favoriteKeys = favoriteKeys.filter((k) => k !== key);
+    saveFavorites();
+
     showToast("File deleted ✅");
     await loadFileList();
   } catch (err) {
@@ -169,37 +212,29 @@ async function deleteFile(key) {
 }
 
 // ===== Render =====
-function renderFileList() {
-  if (!fileListDiv) return;
-
-  fileListDiv.classList.remove("file-list--loading");
-
-  if (!allFiles.length) {
-    fileListDiv.innerHTML = `
-      <div class="file-list-empty">
-        <span class="file-list-empty-icon">📂</span>
-        <div>No files uploaded yet.</div>
-        <div class="small">Upload your first note from the panel on the left.</div>
-      </div>
-    `;
-    return;
-  }
-
+function getFilteredFiles() {
   const query = (searchInput?.value || "").toLowerCase().trim();
-  const type = typeFilter?.value || "all";
-  const sort = sortSelect?.value || "newest";
   const folder = folderFilter?.value || "all";
+  const sort = sortSelect?.value || "newest";
+  const chip = activeChip;
 
   let files = [...allFiles];
+
+  // Chip filter
+  if (chip === "pdf" || chip === "image" || chip === "doc") {
+    files = files.filter((f) => f.type === chip);
+  } else if (chip === "favorites") {
+    files = files.filter((f) => favoriteKeys.includes(f.key));
+  }
 
   // Folder filter
   if (folder !== "all") {
     files = files.filter((f) => (f.folder || "root") === folder);
   }
 
-  // Type filter
-  if (type !== "all") {
-    files = files.filter((f) => f.type === type);
+  // Extra select typeFilter if present & not "all"
+  if (typeFilter && typeFilter.value !== "all" && chip === "all") {
+    files = files.filter((f) => f.type === typeFilter.value);
   }
 
   // Search
@@ -235,6 +270,27 @@ function renderFileList() {
     }
   });
 
+  return files;
+}
+
+function renderFileList() {
+  if (!fileListDiv) return;
+
+  fileListDiv.classList.remove("file-list--loading");
+
+  if (!allFiles.length) {
+    fileListDiv.innerHTML = `
+      <div class="file-list-empty">
+        <span class="file-list-empty-icon">📂</span>
+        <div>No files uploaded yet.</div>
+        <div class="small">Upload your first note from the left panel.</div>
+      </div>
+    `;
+    return;
+  }
+
+  const files = getFilteredFiles();
+
   fileListDiv.className = `file-list ${viewMode}`;
 
   if (!files.length) {
@@ -255,6 +311,7 @@ function renderFileList() {
       const sizeText = formatSize(file.size);
       const dateText = formatDate(file.lastModified);
       const folderText = file.folder || "root";
+      const isFav = favoriteKeys.includes(file.key);
 
       return `
         <div class="file-item" data-url="${file.url}" data-type="${typeClass}" data-key="${file.key}">
@@ -270,6 +327,11 @@ function renderFileList() {
             </p>
           </div>
           <div class="file-actions">
+            <button type="button" class="favorite-btn ${
+              isFav ? "is-favorite" : ""
+            }" title="Favorite">
+              ${isFav ? "★" : "☆"}
+            </button>
             <button type="button" class="preview-btn">Preview</button>
             <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
             <button type="button" class="delete-btn">Delete</button>
@@ -286,6 +348,7 @@ function renderFileList() {
     const key = item.getAttribute("data-key");
     const previewBtn = item.querySelector(".preview-btn");
     const deleteBtn = item.querySelector(".delete-btn");
+    const favoriteBtn = item.querySelector(".favorite-btn");
 
     previewBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -299,6 +362,11 @@ function renderFileList() {
       }
     });
 
+    favoriteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleFavorite(key, favoriteBtn);
+    });
+
     item.addEventListener("click", (e) => {
       if (e.target.closest(".file-actions")) return;
       openPreview(url, type);
@@ -306,30 +374,58 @@ function renderFileList() {
   });
 }
 
-// ===== Upload =====
-async function handleUpload(e) {
-  e.preventDefault();
-
-  if (!statusDiv) return;
-
-  statusDiv.textContent = "";
-  statusDiv.className = "status-message";
-
-  const fileInput = document.getElementById("fileInput");
-  if (!fileInput || !fileInput.files.length) {
-    statusDiv.textContent = "Please choose a file first.";
-    statusDiv.classList.add("error");
-    return;
+function toggleFavorite(key, btn) {
+  if (favoriteKeys.includes(key)) {
+    favoriteKeys = favoriteKeys.filter((k) => k !== key);
+  } else {
+    favoriteKeys.push(key);
   }
+  saveFavorites();
+  if (btn) {
+    const isFav = favoriteKeys.includes(key);
+    btn.classList.toggle("is-favorite", isFav);
+    btn.textContent = isFav ? "★" : "☆";
+  }
+  // If we're in "favorites" chip view, rerender
+  if (activeChip === "favorites") {
+    renderFileList();
+  }
+}
+
+// ===== Upload =====
+function ensureQueueVisible() {
+  if (!uploadQueue) return;
+  uploadQueue.classList.remove("hidden");
+}
+
+function addQueueItem(filename) {
+  ensureQueueVisible();
+  const el = document.createElement("div");
+  el.className = "queue-item";
+  el.innerHTML = `
+    <span class="queue-name" title="${filename}">${filename}</span>
+    <span class="queue-status uploading">Uploading...</span>
+  `;
+  uploadQueueList.appendChild(el);
+  return el;
+}
+
+function updateQueueItemStatus(el, status, kind) {
+  if (!el) return;
+  const statusSpan = el.querySelector(".queue-status");
+  statusSpan.textContent = status;
+  statusSpan.className = `queue-status ${kind}`;
+}
+
+async function uploadSingleFile(file, folder) {
+  const queueItemEl = addQueueItem(file.name);
 
   const formData = new FormData();
-  formData.append("document", fileInput.files[0]);
-
-  if (folderInput && folderInput.value.trim()) {
-    formData.append("folder", folderInput.value.trim());
+  formData.append("document", file);
+  if (folder) {
+    formData.append("folder", folder);
   }
 
-  statusDiv.textContent = "Uploading...";
   try {
     const res = await fetch(`${BACKEND_URL}/upload`, {
       method: "POST",
@@ -345,33 +441,92 @@ async function handleUpload(e) {
     }
 
     if (!res.ok) {
-      statusDiv.textContent = data.message || "Upload failed.";
-      statusDiv.classList.add("error");
-      showToast("Upload failed");
+      updateQueueItemStatus(
+        queueItemEl,
+        data.message || "Failed",
+        "error"
+      );
+      showToast(`Upload failed: ${file.name}`);
       return;
     }
 
-    statusDiv.innerHTML = `
-      <p>${data.message || "File uploaded successfully!"}</p>
-      ${
-        data.file && data.file.url
-          ? `<p><a href="${data.file.url}" target="_blank" rel="noopener noreferrer">Open uploaded file</a></p>`
-          : ""
-      }
-    `;
-    statusDiv.classList.add("success");
-    fileInput.value = "";
-    if (folderInput) folderInput.value = "";
-    showToast("File uploaded ✅");
-
-    await loadFileList();
+    updateQueueItemStatus(queueItemEl, "Done ✅", "success");
   } catch (err) {
     console.error("Upload error:", err);
-    statusDiv.textContent =
-      "Error uploading file. Check console or your backend logs.";
-    statusDiv.classList.add("error");
-    showToast("Upload error");
+    updateQueueItemStatus(queueItemEl, "Error", "error");
+    showToast(`Upload error: ${file.name}`);
   }
+}
+
+async function handleFilesSelected(filesList) {
+  const files = Array.from(filesList || []);
+  if (!files.length) return;
+
+  if (!statusDiv) return;
+
+  statusDiv.textContent = "";
+  statusDiv.className = "status-message";
+
+  const folder = folderInput && folderInput.value.trim()
+    ? folderInput.value.trim()
+    : "";
+
+  statusDiv.textContent = `Uploading ${files.length} file(s)...`;
+
+  for (const file of files) {
+    await uploadSingleFile(file, folder);
+  }
+
+  statusDiv.textContent = "Upload(s) finished.";
+  statusDiv.classList.add("success");
+  showToast("Upload complete ✅");
+
+  // Clear input but keep folder
+  if (fileInput) fileInput.value = "";
+
+  await loadFileList();
+}
+
+async function handleUpload(e) {
+  e.preventDefault();
+  if (!fileInput || !fileInput.files.length) {
+    statusDiv.textContent = "Please choose at least one file first.";
+    statusDiv.className = "status-message error";
+    return;
+  }
+  await handleFilesSelected(fileInput.files);
+}
+
+// ===== Drag & drop =====
+function setupDragAndDrop() {
+  if (!dropZone || !fileInput) return;
+
+  const highlight = () => dropZone.classList.add("dragover");
+  const unhighlight = () => dropZone.classList.remove("dragover");
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      highlight();
+    });
+  });
+
+  ["dragleave", "drop"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      unhighlight();
+    });
+  });
+
+  dropZone.addEventListener("drop", async (e) => {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    await handleFilesSelected(files);
+  });
+
+  // When user clicks zone, open file dialog (input covers it; already clickable)
 }
 
 // ===== Preview modal =====
@@ -403,36 +558,74 @@ function closePreview() {
   previewBody.innerHTML = "";
 }
 
-// ===== Mobile filters toggle =====
-function toggleLeftPanel() {
-  if (!leftPanel) return;
-  leftPanel.classList.toggle("is-open");
+// ===== Sidebar toggle =====
+function toggleSidebar() {
+  if (!sidebar) return;
+  sidebar.classList.toggle("open");
+}
+
+// ===== Chips =====
+function setActiveChip(name) {
+  activeChip = name;
+  localStorage.setItem("studyDriveActiveChip", activeChip);
+  chips.forEach((chip) => {
+    chip.classList.toggle("chip-active", chip.dataset.chip === activeChip);
+  });
+  renderFileList();
 }
 
 // ===== Init =====
 document.addEventListener("DOMContentLoaded", () => {
+  // Upload form
   if (form) form.addEventListener("submit", handleUpload);
+
+  // Filters
   if (searchInput) searchInput.addEventListener("input", renderFileList);
-  if (typeFilter) typeFilter.addEventListener("change", renderFileList);
   if (sortSelect) sortSelect.addEventListener("change", renderFileList);
   if (folderFilter) folderFilter.addEventListener("change", renderFileList);
+  if (typeFilter) typeFilter.addEventListener("change", renderFileList);
 
+  // View mode
   if (gridViewBtn && listViewBtn) {
+    const applyView = () => {
+      gridViewBtn.classList.toggle("active", viewMode === "grid");
+      listViewBtn.classList.toggle("active", viewMode === "list");
+      renderFileList();
+    };
     gridViewBtn.addEventListener("click", () => {
       viewMode = "grid";
-      gridViewBtn.classList.add("active");
-      listViewBtn.classList.remove("active");
-      renderFileList();
+      localStorage.setItem("studyDriveViewMode", viewMode);
+      applyView();
     });
-
     listViewBtn.addEventListener("click", () => {
       viewMode = "list";
-      listViewBtn.classList.add("active");
-      gridViewBtn.classList.remove("active");
-      renderFileList();
+      localStorage.setItem("studyDriveViewMode", viewMode);
+      applyView();
+    });
+    // initial state
+    applyView();
+  }
+
+  // Chips
+  chips.forEach((chip) => {
+    chip.classList.toggle("chip-active", chip.dataset.chip === activeChip);
+    chip.addEventListener("click", () => {
+      setActiveChip(chip.dataset.chip);
+    });
+  });
+
+  // Upload queue clear
+  if (clearQueueBtn && uploadQueue) {
+    clearQueueBtn.addEventListener("click", () => {
+      uploadQueueList.innerHTML = "";
+      uploadQueue.classList.add("hidden");
     });
   }
 
+  // Drag & drop
+  setupDragAndDrop();
+
+  // Modal
   if (closePreviewBtn) {
     closePreviewBtn.addEventListener("click", closePreview);
   }
@@ -447,9 +640,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (mobileFiltersToggle) {
-    mobileFiltersToggle.addEventListener("click", toggleLeftPanel);
+  // Sidebar toggle
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener("click", toggleSidebar);
   }
 
+  // Favorites nav
+  if (navFavorites) {
+    navFavorites.addEventListener("click", () => {
+      setActiveChip("favorites");
+      showToast("Showing favorite files ⭐");
+    });
+  }
+
+  // Initial load
   loadFileList();
 });
