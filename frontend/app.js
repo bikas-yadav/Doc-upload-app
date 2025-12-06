@@ -376,15 +376,13 @@ function renderFileList() {
               ${file.name || "Untitled file"}
             </p>
             <p class="file-meta">
-              [${folderText}] · ${sizeText || ""}${
-                sizeText && dateText ? " · " : ""
-              }${dateText || ""}
+              [${folderText}] · ${sizeText || ""}${sizeText && dateText ? " · " : ""
+        }${dateText || ""}
             </p>
           </div>
           <div class="file-actions">
-            <button type="button" class="favorite-btn ${
-              isFav ? "is-favorite" : ""
-            }" title="Favorite">
+            <button type="button" class="favorite-btn ${isFav ? "is-favorite" : ""
+        }" title="Favorite">
               ${isFav ? "★" : "☆"}
             </button>
             <button type="button" class="preview-btn">Preview</button>
@@ -864,6 +862,6 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast("Showing favorite files ⭐");
     });
   }
-
+  showSelectedFiles([]);
   loadFileList();
 });
