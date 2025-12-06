@@ -680,7 +680,7 @@ button {
   border-color: rgba(191, 219, 254, 0.7);
 }
 
-/* ========== File list ========== */
+/* ========== File list (fully responsive) ========== */
 .file-list {
   border-radius: 14px;
   border: 1px dashed rgba(75, 85, 99, 0.9);
@@ -691,6 +691,7 @@ button {
   position: relative;
 }
 
+/* Loading skeleton */
 .file-list--loading .skeleton-list {
   display: grid;
   gap: 8px;
@@ -722,9 +723,10 @@ button {
   }
 }
 
+/* Grid & list layouts */
 .file-list.grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
 }
 
@@ -749,10 +751,6 @@ button {
     transform 0.16s ease,
     border-color 0.16s ease,
     background 0.16s ease;
-}
-
-.file-list.grid .file-item {
-  width: calc(50% - 4px);
 }
 
 .file-item:hover {
@@ -817,8 +815,10 @@ button {
 /* File actions */
 .file-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .file-actions button,
@@ -947,10 +947,6 @@ button {
   .main-layout {
     grid-template-columns: 1fr;
   }
-
-  .file-list.grid .file-item {
-    width: 100%;
-  }
 }
 
 @media (max-width: 768px) {
@@ -1002,6 +998,7 @@ button {
 
   .file-actions {
     flex-direction: column;
+    align-items: flex-end;
   }
 
   .main-layout {
