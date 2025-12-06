@@ -8,120 +8,161 @@
 </head>
 <body>
   <div class="app-shell">
-    <!-- Top bar -->
+    <!-- Top Navigation -->
     <header class="top-bar">
       <div class="brand">
-        <div class="brand-icon">SD</div>
-        <div>
+        <div class="brand-logo">
+          <div class="brand-icon">SD</div>
+        </div>
+        <div class="brand-text">
           <h1>My Study Drive</h1>
-          <p>Upload, organize & review your notes and PDFs</p>
+          <p>All your notes, in one clean space.</p>
         </div>
       </div>
-      <div class="top-actions">
-        <span id="fileCount">0 files</span>
-        <span id="totalSize">0 KB</span>
+
+      <div class="top-right">
+        <div class="stats">
+          <div class="stat-chip">
+            <span class="stat-label">Files</span>
+            <span id="fileCount" class="stat-value">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Storage used</span>
+            <span id="totalSize" class="stat-value">0 KB</span>
+          </div>
+        </div>
+        <button id="mobileFiltersToggle" class="mobile-filters-btn">
+          Filters
+          <span class="mobile-filters-dot"></span>
+        </button>
       </div>
     </header>
 
+    <!-- Main layout -->
     <main class="main-content">
       <!-- Left column: upload + filters -->
-      <section class="left-panel">
+      <aside class="left-panel" id="leftPanel">
         <!-- Upload card -->
-        <div class="card upload-card">
-          <h2>Upload a File</h2>
-          <p class="muted">
-            Upload your notes, PDFs or images. They’ll be stored safely in your Study Drive.
-          </p>
-          <form id="uploadForm" class="upload-form">
-            <label for="fileInput" class="file-label">
-              <span>Select a file</span>
-              <span class="file-hint">PDF / Images / Docs</span>
-            </label>
-            <input type="file" id="fileInput" name="document" required />
+        <section class="card upload-card">
+          <div class="card-header">
+            <h2>Upload a file</h2>
+            <p class="muted small">
+              PDFs, images, docs – we’ll keep them organized for you.
+            </p>
+          </div>
 
-            <!-- 🔹 Folder input -->
-            <label for="folderInput" class="file-label">
-              <span>Folder (optional)</span>
-              <span class="file-hint">e.g. os, dbms, personal</span>
+          <form id="uploadForm" class="upload-form">
+            <!-- File input -->
+            <label for="fileInput" class="field-label">
+              <span class="field-title">Choose a file</span>
+              <span class="field-hint">PDF / Images / Docs · max 20 MB</span>
+            </label>
+            <div class="file-input-wrapper">
+              <input type="file" id="fileInput" name="document" required />
+            </div>
+
+            <!-- Folder input -->
+            <label for="folderInput" class="field-label">
+              <span class="field-title">Folder (optional)</span>
+              <span class="field-hint">e.g. os, dbms, personal</span>
             </label>
             <input
               type="text"
               id="folderInput"
-              placeholder="If empty, goes to 'root'"
+              class="text-input"
+              placeholder="If empty, file goes to 'root'"
             />
 
-            <button type="submit">Upload</button>
+            <button type="submit" class="primary-btn">
+              Upload to Study Drive
+            </button>
+
+            <div id="status" class="status-message"></div>
           </form>
-          <div id="status"></div>
-        </div>
+        </section>
 
         <!-- Filters card -->
-        <div class="card filters-card">
-          <h3>Filter & Search</h3>
+        <section class="card filters-card">
+          <div class="card-header">
+            <h3>Filter &amp; search</h3>
+          </div>
           <div class="filters">
             <div class="filter-group">
               <label for="searchInput">Search by name</label>
               <input
                 type="text"
                 id="searchInput"
-                placeholder="e.g. OS-notes, DBMS.pdf"
+                class="text-input"
+                placeholder="e.g. os-notes.pdf"
               />
             </div>
 
-            <div class="filter-group">
-              <label for="folderFilter">Folder</label>
-              <select id="folderFilter">
-                <option value="all">All folders</option>
-              </select>
+            <div class="filter-row">
+              <div class="filter-group">
+                <label for="folderFilter">Folder</label>
+                <select id="folderFilter" class="select-input">
+                  <option value="all">All folders</option>
+                </select>
+              </div>
+
+              <div class="filter-group">
+                <label for="typeFilter">Type</label>
+                <select id="typeFilter" class="select-input">
+                  <option value="all">All types</option>
+                  <option value="pdf">PDFs</option>
+                  <option value="image">Images</option>
+                  <option value="doc">Documents</option>
+                  <option value="other">Others</option>
+                </select>
+              </div>
             </div>
 
-            <div class="filter-group">
-              <label for="typeFilter">Type</label>
-              <select id="typeFilter">
-                <option value="all">All types</option>
-                <option value="pdf">PDFs</option>
-                <option value="image">Images</option>
-                <option value="doc">Documents</option>
-                <option value="other">Others</option>
-              </select>
-            </div>
+            <div class="filter-row">
+              <div class="filter-group">
+                <label for="sortSelect">Sort by</label>
+                <select id="sortSelect" class="select-input">
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="az">Name A → Z</option>
+                  <option value="za">Name Z → A</option>
+                  <option value="sizeAsc">Size small → large</option>
+                  <option value="sizeDesc">Size large → small</option>
+                </select>
+              </div>
 
-            <div class="filter-group">
-              <label for="sortSelect">Sort by</label>
-              <select id="sortSelect">
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="az">Name A → Z</option>
-                <option value="za">Name Z → A</option>
-                <option value="sizeAsc">Size small → large</option>
-                <option value="sizeDesc">Size large → small</option>
-              </select>
-            </div>
-
-            <div class="view-toggle-group">
-              <span>View:</span>
-              <button type="button" id="gridViewBtn" class="view-btn active">
-                Grid
-              </button>
-              <button type="button" id="listViewBtn" class="view-btn">
-                List
-              </button>
+              <div class="filter-group view-toggle-group">
+                <span class="view-label">View</span>
+                <div class="view-buttons">
+                  <button type="button" id="gridViewBtn" class="view-btn active">
+                    Grid
+                  </button>
+                  <button type="button" id="listViewBtn" class="view-btn">
+                    List
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </aside>
 
       <!-- Right column: file list / drive view -->
-      <section class="right-panel card">
-        <div class="right-header">
-          <h2>Your Files</h2>
-          <p class="muted small">
-            Click on a file to open it. PDFs and images can also be previewed.
-          </p>
-        </div>
+      <section class="right-panel">
+        <header class="right-header">
+          <div>
+            <h2>Your files</h2>
+            <p class="muted small">
+              Preview PDFs &amp; images instantly, or open any file in a new tab.
+            </p>
+          </div>
+        </header>
 
-        <div id="fileList" class="file-list">
-          Loading files...
+        <div id="fileList" class="file-list file-list--loading">
+          <div class="skeleton-list">
+            <div class="skeleton-item"></div>
+            <div class="skeleton-item"></div>
+            <div class="skeleton-item"></div>
+          </div>
         </div>
       </section>
     </main>
@@ -131,10 +172,10 @@
   <div id="previewModal" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-content">
-      <button id="closePreviewBtn" class="close-btn">&times;</button>
-      <div id="previewBody" class="preview-body">
-        <!-- Preview content injected by JS -->
-      </div>
+      <button id="closePreviewBtn" class="close-btn" aria-label="Close preview">
+        &times;
+      </button>
+      <div id="previewBody" class="preview-body"></div>
     </div>
   </div>
 
