@@ -551,7 +551,7 @@ async function handleFilesSelected(filesList) {
   if (fileInput) fileInput.value = "";
 
   // 🔹 clear list under drop zone after upload
-  showSelectedFiles([]);
+ // showSelectedFiles([]);
 
   await loadFileList();
 }
@@ -862,6 +862,5 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast("Showing favorite files ⭐");
     });
   }
-  showSelectedFiles([]);
   loadFileList();
 });
