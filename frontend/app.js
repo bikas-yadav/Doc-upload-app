@@ -142,9 +142,7 @@ function showSelectedFiles(filesList) {
     return;
   }
   selectedFilesList.innerHTML = files
-    .map(
-      (f) => `<li title="${f.name}">${f.name}</li>`
-    )
+    .map((f) => `<li title="${f.name}">${f.name}</li>`)
     .join("");
 }
 

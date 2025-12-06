@@ -602,22 +602,31 @@ button {
 .queue-clear-btn:hover {
   text-decoration: underline;
 }
-
+/* Selected files under drop zone */
 .selected-files {
-  margin: 6px 0 0;
-  padding-left: 14px;
-  list-style: disc;
-  max-height: 90px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  list-style: none;
+  max-height: 110px;
   overflow-y: auto;
-  font-size: 11px;
-  color: var(--text-subtle);
+  font-size: 12px;
+  color: #e5e7eb;          /* bright text so it's visible */
 }
 
 .selected-files li {
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+
+/* little bullet indicator */
+.selected-files li::before {
+  content: "• ";
+  color: #a5b4fc;
 }
 
 /* ========== Filters ========== */
