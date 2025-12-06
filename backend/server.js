@@ -82,56 +82,75 @@ app.post("/upload", upload.single("document"), async (req, res) => {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    if (!S3_BUCKET) {
-      return res.status(500).json({ message: "S3 bucket not configured" });
-    }
-
     const file = req.file;
     const originalName = file.originalname || "file";
     const ext = path.extname(originalName);
-    const baseName = path
-      .basename(originalName, ext)
+    let baseName = path.basename(originalName, ext)
       .replace(/\s+/g, "_")
-      .toLowerCase();
-    const timestamp = Date.now();
+      .replace(/[^\w\-]/g, "_");
 
-    const rawFolder = (req.body && req.body.folder) || "";
-    const folderSafe = safeFolderName(rawFolder);
+    // Folder from form
+    const rawFolder = (req.body && req.body.folder ? req.body.folder : "").trim();
+    let folderSafe = rawFolder || "root";
+    folderSafe = folderSafe.replace(/[^\w\-]/g, "_").toLowerCase();
 
-    // Store under uploads/<folder>/
-    const key = `uploads/${folderSafe}/${baseName}-${timestamp}${ext}`;
+    // Start with clean filename
+    let finalName = `${baseName}${ext}`;
+    let key = `uploads/${folderSafe}/${finalName}`;
 
+    // 🔥 AUTO-INCREMENT LOGIC
+    let counter = 1;
+    while (true) {
+      try {
+        // Check if key exists
+        await S3.headObject({ Bucket: S3_BUCKET, Key: key }).promise();
+
+        // If it exists → generate next name
+        finalName = `${baseName}(${counter})${ext}`;
+        key = `uploads/${folderSafe}/${finalName}`;
+        counter++;
+
+      } catch (err) {
+        // If headObject throws → file does not exist → break loop
+        break;
+      }
+    }
+
+    // Upload to S3
     const params = {
       Bucket: S3_BUCKET,
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
-      ACL: "private",
+      ACL: "private"
     };
 
-    const result = await S3.upload(params).promise();
+    await S3.upload(params).promise();
 
-    const signedUrl = makeSignedUrl(key);
+    // Signed URL
+    const signedUrl = S3.getSignedUrl("getObject", {
+      Bucket: S3_BUCKET,
+      Key: key,
+      Expires: 3600
+    });
 
     res.json({
-      message: "File uploaded successfully to S3!",
+      message: "File uploaded successfully!",
       file: {
-        originalName,
+        originalName: finalName,
         key,
         size: file.size,
         folder: folderSafe,
-        location: result.Location,
-        url: signedUrl,
-      },
+        url: signedUrl
+      }
     });
+
   } catch (err) {
     console.error("Upload error:", err);
-    if (err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ message: "File too large" });
-    }
-    res
-      .status(500)
-      .json({ message: "Failed to upload file", error: err.message });
+    res.status(500).json({
+      message: "Failed to upload file",
+      error: err.message
+    });
   }
 });
 
