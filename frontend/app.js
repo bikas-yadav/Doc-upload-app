@@ -6,7 +6,7 @@ const form = document.getElementById("uploadForm");
 const statusDiv = document.getElementById("status");
 const fileListDiv = document.getElementById("fileList");
 const searchInput = document.getElementById("searchInput");
-const typeFilter = document.getElementById("typeFilter"); // optional (we also have chips)
+const typeFilter = document.getElementById("typeFilter");
 const sortSelect = document.getElementById("sortSelect");
 const gridViewBtn = document.getElementById("gridViewBtn");
 const listViewBtn = document.getElementById("listViewBtn");
@@ -31,11 +31,17 @@ const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebarToggle");
 const navFavorites = document.getElementById("navFavorites");
 
+// NEW: details modal elements
+const detailsModal = document.getElementById("detailsModal");
+const detailsBody = document.getElementById("detailsBody");
+const closeDetailsBtn = document.getElementById("closeDetailsBtn");
+
 // ===== State =====
 let allFiles = [];
 let viewMode = localStorage.getItem("studyDriveViewMode") || "grid";
 let activeChip = localStorage.getItem("studyDriveActiveChip") || "all";
 let favoriteKeys = loadFavorites();
+let currentDetailsFile = null;
 
 // ===== Helpers =====
 function loadFavorites() {
@@ -126,7 +132,7 @@ function updateFolderFilterOptions() {
     folders.map((f) => `<option value="${f}">${f}</option>`).join("");
 }
 
-// ===== API: load/delete =====
+// ===== API: load/delete/download/rename/move =====
 async function loadFileList() {
   if (!fileListDiv) return;
 
@@ -211,7 +217,59 @@ async function deleteFile(key) {
   }
 }
 
-// ===== Render =====
+async function handleDownload(key) {
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`
+    );
+    const data = await res.json();
+    if (!res.ok || !data.url) {
+      showToast(data.message || "Failed to generate download link");
+      return;
+    }
+    // Trigger download via hidden link
+    const a = document.createElement("a");
+    a.href = data.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.click();
+  } catch (err) {
+    console.error("Download error:", err);
+    showToast("Download failed");
+  }
+}
+
+async function renameFile(key, newName) {
+  const res = await fetch(`${BACKEND_URL}/files/rename`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ key, newName }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || "Rename failed");
+  }
+  return data.file;
+}
+
+async function moveFile(key, newFolder) {
+  const res = await fetch(`${BACKEND_URL}/files/move`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ key, newFolder }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || "Move failed");
+  }
+  return data.file;
+}
+
+// ===== Filtering / View =====
 function getFilteredFiles() {
   const query = (searchInput?.value || "").toLowerCase().trim();
   const folder = folderFilter?.value || "all";
@@ -232,7 +290,7 @@ function getFilteredFiles() {
     files = files.filter((f) => (f.folder || "root") === folder);
   }
 
-  // Extra select typeFilter if present & not "all"
+  // Extra typeFilter if present and chip is "all"
   if (typeFilter && typeFilter.value !== "all" && chip === "all") {
     files = files.filter((f) => f.type === typeFilter.value);
   }
@@ -290,7 +348,6 @@ function renderFileList() {
   }
 
   const files = getFilteredFiles();
-
   fileListDiv.className = `file-list ${viewMode}`;
 
   if (!files.length) {
@@ -334,6 +391,8 @@ function renderFileList() {
             </button>
             <button type="button" class="preview-btn">Preview</button>
             <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
+            <button type="button" class="download-btn">Download</button>
+            <button type="button" class="details-btn">Details</button>
             <button type="button" class="delete-btn">Delete</button>
           </div>
         </div>
@@ -349,6 +408,8 @@ function renderFileList() {
     const previewBtn = item.querySelector(".preview-btn");
     const deleteBtn = item.querySelector(".delete-btn");
     const favoriteBtn = item.querySelector(".favorite-btn");
+    const downloadBtn = item.querySelector(".download-btn");
+    const detailsBtn = item.querySelector(".details-btn");
 
     previewBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -365,6 +426,17 @@ function renderFileList() {
     favoriteBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       toggleFavorite(key, favoriteBtn);
+    });
+
+    downloadBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDownload(key);
+    });
+
+    detailsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const file = allFiles.find((f) => f.key === key);
+      if (file) openDetails(file);
     });
 
     item.addEventListener("click", (e) => {
@@ -386,13 +458,12 @@ function toggleFavorite(key, btn) {
     btn.classList.toggle("is-favorite", isFav);
     btn.textContent = isFav ? "★" : "☆";
   }
-  // If we're in "favorites" chip view, rerender
   if (activeChip === "favorites") {
     renderFileList();
   }
 }
 
-// ===== Upload =====
+// ===== Upload / Queue =====
 function ensureQueueVisible() {
   if (!uploadQueue) return;
   uploadQueue.classList.remove("hidden");
@@ -481,7 +552,6 @@ async function handleFilesSelected(filesList) {
   statusDiv.classList.add("success");
   showToast("Upload complete ✅");
 
-  // Clear input but keep folder
   if (fileInput) fileInput.value = "";
 
   await loadFileList();
@@ -525,8 +595,6 @@ function setupDragAndDrop() {
     const files = dt.files;
     await handleFilesSelected(files);
   });
-
-  // When user clicks zone, open file dialog (input covers it; already clickable)
 }
 
 // ===== Preview modal =====
@@ -558,13 +626,137 @@ function closePreview() {
   previewBody.innerHTML = "";
 }
 
-// ===== Sidebar toggle =====
+// ===== Details modal (rename/move) =====
+function openDetails(file) {
+  currentDetailsFile = file;
+  if (!detailsModal || !detailsBody) return;
+
+  const sizeText = formatSize(file.size);
+  const dateText = formatDate(file.lastModified);
+  const typeText = file.type || detectType(file.name);
+
+  detailsBody.innerHTML = `
+    <h3 style="margin:0 0 8px;font-size:15px;">File details</h3>
+    <p style="font-size:12px;color:#9ca3af;margin:0 0 10px;">View and manage this file.</p>
+
+    <div style="font-size:13px;line-height:1.5;">
+      <div><strong>Name:</strong> ${file.name}</div>
+      <div><strong>Folder:</strong> ${file.folder || "root"}</div>
+      <div><strong>Type:</strong> ${typeText}</div>
+      <div><strong>Size:</strong> ${sizeText}</div>
+      <div><strong>Last modified:</strong> ${dateText}</div>
+      <div style="word-break:break-all;"><strong>Key:</strong> ${file.key}</div>
+    </div>
+
+    <hr style="margin:10px 0;border-color:#1f2937;" />
+
+    <div style="font-size:13px;display:flex;flex-direction:column;gap:8px;">
+      <div>
+        <label style="font-size:12px;display:block;margin-bottom:2px;">Rename</label>
+        <div style="display:flex;gap:6px;">
+          <input id="renameInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" value="${file.name.replace(/\.[^/.]+$/, "")}" />
+          <button id="renameBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#4f46e5;color:#e5e7eb;font-size:12px;cursor:pointer;">Save</button>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;display:block;margin-bottom:2px;">Move to folder</label>
+        <div style="display:flex;gap:6px;">
+          <input id="moveInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" placeholder="e.g. semester-5, os" />
+          <button id="moveBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#10b981;color:#022c22;font-size:12px;cursor:pointer;">Move</button>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;display:block;margin-bottom:2px;">Share / open link</label>
+        <div style="display:flex;gap:6px;">
+          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${file.url}" />
+          <button id="copyLinkBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#111827;color:#e5e7eb;font-size:12px;cursor:pointer;">Copy</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Wire up buttons
+  const renameInput = document.getElementById("renameInput");
+  const renameBtn = document.getElementById("renameBtn");
+  const moveInput = document.getElementById("moveInput");
+  const moveBtn = document.getElementById("moveBtn");
+  const copyLinkBtn = document.getElementById("copyLinkBtn");
+  const linkInput = document.getElementById("linkInput");
+
+  if (renameBtn && renameInput) {
+    renameBtn.addEventListener("click", async () => {
+      const base = renameInput.value.trim();
+      if (!base) {
+        showToast("Name cannot be empty");
+        return;
+      }
+      const extMatch = file.name.match(/\.[^/.]+$/);
+      const ext = extMatch ? extMatch[0] : "";
+      const newName = base + ext;
+      try {
+        const updated = await renameFile(file.key, newName);
+        showToast("File renamed ✅");
+        await loadFileList();
+        // update currentDetailsFile to reflect new key/name
+        currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
+        closeDetails();
+      } catch (err) {
+        console.error("Rename error:", err);
+        showToast("Rename failed");
+      }
+    });
+  }
+
+  if (moveBtn && moveInput) {
+    moveBtn.addEventListener("click", async () => {
+      const newFolder = moveInput.value.trim();
+      if (!newFolder) {
+        showToast("Folder cannot be empty");
+        return;
+      }
+      try {
+        const updated = await moveFile(file.key, newFolder);
+        showToast("File moved ✅");
+        await loadFileList();
+        currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
+        closeDetails();
+      } catch (err) {
+        console.error("Move error:", err);
+        showToast("Move failed");
+      }
+    });
+  }
+
+  if (copyLinkBtn && linkInput) {
+    copyLinkBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(linkInput.value);
+        showToast("Link copied 📋");
+      } catch {
+        linkInput.select();
+        showToast("Link ready to copy");
+      }
+    });
+  }
+
+  detailsModal.classList.remove("hidden");
+}
+
+function closeDetails() {
+  if (!detailsModal || !detailsBody) return;
+  detailsModal.classList.add("hidden");
+  detailsBody.innerHTML = "";
+  currentDetailsFile = null;
+}
+
+// ===== Sidebar & chips =====
 function toggleSidebar() {
   if (!sidebar) return;
   sidebar.classList.toggle("open");
 }
 
-// ===== Chips =====
 function setActiveChip(name) {
   activeChip = name;
   localStorage.setItem("studyDriveActiveChip", activeChip);
@@ -576,10 +768,8 @@ function setActiveChip(name) {
 
 // ===== Init =====
 document.addEventListener("DOMContentLoaded", () => {
-  // Upload form
   if (form) form.addEventListener("submit", handleUpload);
 
-  // Filters
   if (searchInput) searchInput.addEventListener("input", renderFileList);
   if (sortSelect) sortSelect.addEventListener("change", renderFileList);
   if (folderFilter) folderFilter.addEventListener("change", renderFileList);
@@ -602,7 +792,6 @@ document.addEventListener("DOMContentLoaded", () => {
       localStorage.setItem("studyDriveViewMode", viewMode);
       applyView();
     });
-    // initial state
     applyView();
   }
 
@@ -614,7 +803,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Upload queue clear
+  // Queue clear
   if (clearQueueBtn && uploadQueue) {
     clearQueueBtn.addEventListener("click", () => {
       uploadQueueList.innerHTML = "";
@@ -625,7 +814,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Drag & drop
   setupDragAndDrop();
 
-  // Modal
+  // Preview modal
   if (closePreviewBtn) {
     closePreviewBtn.addEventListener("click", closePreview);
   }
@@ -640,12 +829,27 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Sidebar toggle
+  // Details modal
+  if (closeDetailsBtn) {
+    closeDetailsBtn.addEventListener("click", closeDetails);
+  }
+  if (detailsModal) {
+    detailsModal.addEventListener("click", (e) => {
+      if (
+        e.target === detailsModal ||
+        e.target.classList.contains("modal-backdrop")
+      ) {
+        closeDetails();
+      }
+    });
+  }
+
+  // Sidebar
   if (sidebarToggle) {
     sidebarToggle.addEventListener("click", toggleSidebar);
   }
 
-  // Favorites nav
+  // Favorites nav shortcut
   if (navFavorites) {
     navFavorites.addEventListener("click", () => {
       setActiveChip("favorites");
@@ -653,6 +857,5 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Initial load
   loadFileList();
 });

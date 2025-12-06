@@ -94,7 +94,9 @@
           <section class="card upload-card">
             <div class="card-header">
               <h2>Upload files</h2>
-              <p class="muted small">Drag &amp; drop or browse – we’ll organize them by folder.</p>
+              <p class="muted small">
+                Drag &amp; drop or browse – we’ll organize them by folder.
+              </p>
             </div>
 
             <form id="uploadForm" class="upload-form">
@@ -112,7 +114,9 @@
                   <div class="drop-zone-text-sub">
                     or <span class="browse-text">browse</span> from your device
                   </div>
-                  <div class="drop-zone-hint">PDF / Images / Docs · max 20 MB per file</div>
+                  <div class="drop-zone-hint">
+                    PDF / Images / Docs · max 20 MB per file
+                  </div>
                 </div>
               </div>
 
@@ -139,7 +143,9 @@
             <div id="uploadQueue" class="upload-queue hidden">
               <div class="upload-queue-header">
                 <span>Upload queue</span>
-                <button id="clearQueueBtn" type="button" class="queue-clear-btn">Clear</button>
+                <button id="clearQueueBtn" type="button" class="queue-clear-btn">
+                  Clear
+                </button>
               </div>
               <div id="uploadQueueList" class="upload-queue-list"></div>
             </div>
@@ -190,12 +196,32 @@
                 </div>
               </div>
 
+              <!-- optional extra type dropdown (JS treats it as optional) -->
               <div class="filter-row">
+                <div class="filter-group">
+                  <label for="typeFilter">Type (extra filter)</label>
+                  <select id="typeFilter" class="select-input">
+                    <option value="all">All types</option>
+                    <option value="pdf">PDFs</option>
+                    <option value="image">Images</option>
+                    <option value="doc">Documents</option>
+                    <option value="other">Others</option>
+                  </select>
+                </div>
+
                 <div class="filter-group view-toggle-group">
                   <span class="view-label">View</span>
                   <div class="view-buttons">
-                    <button type="button" id="gridViewBtn" class="view-btn active">Grid</button>
-                    <button type="button" id="listViewBtn" class="view-btn">List</button>
+                    <button
+                      type="button"
+                      id="gridViewBtn"
+                      class="view-btn active"
+                    >
+                      Grid
+                    </button>
+                    <button type="button" id="listViewBtn" class="view-btn">
+                      List
+                    </button>
                   </div>
                 </div>
               </div>
@@ -209,7 +235,7 @@
             <div>
               <h2>Your files</h2>
               <p class="muted small">
-                Click to preview PDFs and images, or open in a new tab.
+                Click to preview PDFs &amp; images, or open / download the file.
               </p>
             </div>
           </header>
@@ -234,6 +260,19 @@
         &times;
       </button>
       <div id="previewBody" class="preview-body"></div>
+    </div>
+  </div>
+
+  <!-- File details modal -->
+  <div id="detailsModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button id="closeDetailsBtn" class="close-btn" aria-label="Close details">
+        &times;
+      </button>
+      <div id="detailsBody" class="preview-body">
+        <!-- Populated by JS -->
+      </div>
     </div>
   </div>
 

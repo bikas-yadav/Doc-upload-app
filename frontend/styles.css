@@ -40,6 +40,10 @@ button {
   font-family: inherit;
 }
 
+.small {
+  font-size: 12px;
+}
+
 /* ========== App layout ========== */
 .app-root {
   display: flex;
@@ -366,6 +370,10 @@ button {
 .right-header h2 {
   margin: 0 0 3px;
   font-size: 16px;
+}
+
+.muted {
+  color: var(--text-subtle);
 }
 
 /* ========== Upload area ========== */
@@ -859,7 +867,7 @@ button {
   margin-bottom: 4px;
 }
 
-/* ========== Modal ========== */
+/* ========== Modals (preview + details) ========== */
 .modal.hidden {
   display: none;
 }
