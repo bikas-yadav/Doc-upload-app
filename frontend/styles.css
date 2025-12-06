@@ -439,6 +439,32 @@ button {
   color: var(--text-subtle);
 }
 
+/* Selected files under drop zone */
+.selected-files {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  list-style: none;
+  max-height: 110px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+.selected-files li {
+  margin-bottom: 3px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.selected-files li::before {
+  content: "• ";
+  color: #a5b4fc;
+}
+
 /* Form fields */
 .field-label {
   display: flex;
@@ -602,32 +628,6 @@ button {
 .queue-clear-btn:hover {
   text-decoration: underline;
 }
-/* Selected files under drop zone */
-.selected-files {
-  margin-top: 8px;
-  padding: 6px 8px;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.6);
-  list-style: none;
-  max-height: 110px;
-  overflow-y: auto;
-  font-size: 12px;
-  color: #e5e7eb;          /* bright text so it's visible */
-}
-
-.selected-files li {
-  margin-bottom: 3px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-}
-
-/* little bullet indicator */
-.selected-files li::before {
-  content: "• ";
-  color: #a5b4fc;
-}
 
 /* ========== Filters ========== */
 .filters {
@@ -706,7 +706,7 @@ button {
   border-color: rgba(191, 219, 254, 0.7);
 }
 
-/* ========== File list (fully responsive) ========== */
+/* ========== File list (grid + list) ========== */
 .file-list {
   border-radius: 14px;
   border: 1px dashed rgba(75, 85, 99, 0.9);
@@ -752,8 +752,8 @@ button {
 /* Grid & list layouts */
 .file-list.grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
 }
 
 .file-list.list {
@@ -762,14 +762,12 @@ button {
   gap: 6px;
 }
 
-/* File item */
+/* Base file item */
 .file-item {
   background: radial-gradient(circle at top, #111827, #020617 65%);
   border-radius: 12px;
   padding: 8px 9px;
   display: flex;
-  align-items: center;
-  gap: 9px;
   border: 1px solid rgba(55, 65, 81, 0.95);
   cursor: pointer;
   transition:
@@ -779,6 +777,22 @@ button {
     background 0.16s ease;
 }
 
+/* GRID: vertical card */
+.file-list.grid .file-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 11px;
+}
+
+/* LIST: horizontal row */
+.file-list.list .file-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+}
+
+/* Hover */
 .file-item:hover {
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.95);
   border-color: rgba(129, 140, 248, 1);
@@ -786,7 +800,7 @@ button {
   transform: translateY(-1px);
 }
 
-/* File icon */
+/* Icon */
 .file-icon {
   width: 34px;
   height: 34px;
@@ -804,23 +818,25 @@ button {
 .file-icon.pdf {
   background: radial-gradient(circle at 0 0, #f97373, #b91c1c);
 }
-
 .file-icon.image {
   background: radial-gradient(circle at 0 0, #22c55e, #15803d);
 }
-
 .file-icon.doc {
   background: radial-gradient(circle at 0 0, #60a5fa, #1d4ed8);
 }
-
 .file-icon.other {
   background: radial-gradient(circle at 0 0, #9ca3af, #4b5563);
 }
 
-/* File main */
+/* Main text area */
 .file-main {
   flex: 1;
   min-width: 0;
+}
+
+/* Extra margin in grid so text isn't stuck to icon */
+.file-list.grid .file-main {
+  margin-top: 4px;
 }
 
 .file-name {
@@ -838,12 +854,20 @@ button {
   color: var(--text-subtle);
 }
 
-/* File actions */
+/* Actions */
 .file-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.file-list.grid .file-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.file-list.list .file-actions {
   justify-content: flex-end;
 }
 

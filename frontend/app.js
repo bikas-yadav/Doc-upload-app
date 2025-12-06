@@ -549,7 +549,7 @@ async function handleFilesSelected(filesList) {
   if (fileInput) fileInput.value = "";
 
   // 🔹 clear list under drop zone after upload
- // showSelectedFiles([]);
+  // showSelectedFiles([]);
 
   await loadFileList();
 }

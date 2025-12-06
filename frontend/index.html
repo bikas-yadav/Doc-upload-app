@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Study Drive</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
   <div class="app-root">
     <!-- Sidebar -->
@@ -101,13 +103,7 @@
 
             <form id="uploadForm" class="upload-form">
               <div id="dropZone" class="drop-zone">
-                <input
-                  type="file"
-                  id="fileInput"
-                  name="document"
-                  multiple
-                  class="drop-zone-input"
-                />
+                <input type="file" id="fileInput" name="document" multiple class="drop-zone-input" />
                 <div class="drop-zone-content">
                   <div class="drop-zone-icon">⬆️</div>
                   <div class="drop-zone-text-main">Drop files here to upload</div>
@@ -119,18 +115,13 @@
                   </div>
                 </div>
               </div>
-<ul id="selectedFielesList" class="selected-files"></ul>
+              <ul id="selectedFielesList" class="selected-files"></ul>
               <!-- Folder -->
               <label for="folderInput" class="field-label">
                 <span class="field-title">Folder (optional)</span>
                 <span class="field-hint">e.g. os, dbms, semester-5</span>
               </label>
-              <input
-                type="text"
-                id="folderInput"
-                class="text-input"
-                placeholder="If empty, file goes to 'root'"
-              />
+              <input type="text" id="folderInput" class="text-input" placeholder="If empty, file goes to 'root'" />
 
               <button type="submit" class="primary-btn">
                 Upload selected files
@@ -159,12 +150,7 @@
             <div class="filters">
               <div class="filter-group">
                 <label for="searchInput">Search by name</label>
-                <input
-                  type="text"
-                  id="searchInput"
-                  class="text-input"
-                  placeholder="e.g. os-notes.pdf"
-                />
+                <input type="text" id="searchInput" class="text-input" placeholder="e.g. os-notes.pdf" />
               </div>
 
               <div class="filter-chips">
@@ -212,11 +198,7 @@
                 <div class="filter-group view-toggle-group">
                   <span class="view-label">View</span>
                   <div class="view-buttons">
-                    <button
-                      type="button"
-                      id="gridViewBtn"
-                      class="view-btn active"
-                    >
+                    <button type="button" id="gridViewBtn" class="view-btn active">
                       Grid
                     </button>
                     <button type="button" id="listViewBtn" class="view-btn">
@@ -281,4 +263,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>
