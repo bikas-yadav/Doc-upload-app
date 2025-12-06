@@ -603,6 +603,23 @@ button {
   text-decoration: underline;
 }
 
+.selected-files {
+  margin: 6px 0 0;
+  padding-left: 14px;
+  list-style: disc;
+  max-height: 90px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+.selected-files li {
+  margin-bottom: 2px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
 /* ========== Filters ========== */
 .filters {
   margin-top: 8px;

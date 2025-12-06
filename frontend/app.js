@@ -1,5 +1,5 @@
 // ===== Config =====
-const BACKEND_URL = "https://doc-upload-app.onrender.com"; // same backend
+const BACKEND_URL = "https://doc-upload-app.onrender.com"; // your backend
 
 // ===== DOM =====
 const form = document.getElementById("uploadForm");
@@ -30,11 +30,12 @@ const clearQueueBtn = document.getElementById("clearQueueBtn");
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebarToggle");
 const navFavorites = document.getElementById("navFavorites");
-
-// NEW: details modal elements
 const detailsModal = document.getElementById("detailsModal");
 const detailsBody = document.getElementById("detailsBody");
 const closeDetailsBtn = document.getElementById("closeDetailsBtn");
+
+// 🔹 NEW: list under drop zone to show selected/dropped files
+const selectedFilesList = document.getElementById("selectedFilesList");
 
 // ===== State =====
 let allFiles = [];
@@ -105,7 +106,7 @@ function getIconText(type) {
 function updateStats() {
   const count = allFiles.length;
   const totalBytes = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
-  const storageLimitBytes = 1024 * 1024 * 1024; // 1 GB (fake limit for UI)
+  const storageLimitBytes = 1024 * 1024 * 1024; // fake 1 GB limit
 
   if (fileCountSpan) fileCountSpan.textContent = `${count}`;
   if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
@@ -130,6 +131,21 @@ function updateFolderFilterOptions() {
   folderFilter.innerHTML =
     '<option value="all">All folders</option>' +
     folders.map((f) => `<option value="${f}">${f}</option>`).join("");
+}
+
+// 🔹 NEW: show list of selected / dropped files under drop zone
+function showSelectedFiles(filesList) {
+  if (!selectedFilesList) return;
+  const files = Array.from(filesList || []);
+  if (!files.length) {
+    selectedFilesList.innerHTML = "";
+    return;
+  }
+  selectedFilesList.innerHTML = files
+    .map(
+      (f) => `<li title="${f.name}">${f.name}</li>`
+    )
+    .join("");
 }
 
 // ===== API: load/delete/download/rename/move =====
@@ -205,7 +221,6 @@ async function deleteFile(key) {
       return;
     }
 
-    // Remove from favorites if present
     favoriteKeys = favoriteKeys.filter((k) => k !== key);
     saveFavorites();
 
@@ -219,20 +234,8 @@ async function deleteFile(key) {
 
 async function handleDownload(key) {
   try {
-    const res = await fetch(
-      `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`
-    );
-    const data = await res.json();
-    if (!res.ok || !data.url) {
-      showToast(data.message || "Failed to generate download link");
-      return;
-    }
-    // Trigger download via hidden link
-    const a = document.createElement("a");
-    a.href = data.url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.click();
+    const url = `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`;
+    window.location.href = url;
   } catch (err) {
     console.error("Download error:", err);
     showToast("Download failed");
@@ -278,31 +281,26 @@ function getFilteredFiles() {
 
   let files = [...allFiles];
 
-  // Chip filter
   if (chip === "pdf" || chip === "image" || chip === "doc") {
     files = files.filter((f) => f.type === chip);
   } else if (chip === "favorites") {
     files = files.filter((f) => favoriteKeys.includes(f.key));
   }
 
-  // Folder filter
   if (folder !== "all") {
     files = files.filter((f) => (f.folder || "root") === folder);
   }
 
-  // Extra typeFilter if present and chip is "all"
   if (typeFilter && typeFilter.value !== "all" && chip === "all") {
     files = files.filter((f) => f.type === typeFilter.value);
   }
 
-  // Search
   if (query) {
     files = files.filter((f) =>
       (f.name || "").toLowerCase().includes(query)
     );
   }
 
-  // Sort
   files.sort((a, b) => {
     const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
     const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
@@ -400,7 +398,6 @@ function renderFileList() {
     })
     .join("");
 
-  // Attach handlers
   fileListDiv.querySelectorAll(".file-item").forEach((item) => {
     const url = item.getAttribute("data-url");
     const type = item.getAttribute("data-type");
@@ -538,9 +535,10 @@ async function handleFilesSelected(filesList) {
   statusDiv.textContent = "";
   statusDiv.className = "status-message";
 
-  const folder = folderInput && folderInput.value.trim()
-    ? folderInput.value.trim()
-    : "";
+  const folder =
+    folderInput && folderInput.value.trim()
+      ? folderInput.value.trim()
+      : "";
 
   statusDiv.textContent = `Uploading ${files.length} file(s)...`;
 
@@ -553,6 +551,9 @@ async function handleFilesSelected(filesList) {
   showToast("Upload complete ✅");
 
   if (fileInput) fileInput.value = "";
+
+  // 🔹 clear list under drop zone after upload
+  showSelectedFiles([]);
 
   await loadFileList();
 }
@@ -593,6 +594,16 @@ function setupDragAndDrop() {
   dropZone.addEventListener("drop", async (e) => {
     const dt = e.dataTransfer;
     const files = dt.files;
+
+    // 🔹 show names in the list
+    showSelectedFiles(files);
+
+    // optional: sync to hidden file input so form submit sees them
+    const dataTransfer = new DataTransfer();
+    Array.from(files).forEach((f) => dataTransfer.items.add(f));
+    fileInput.files = dataTransfer.files;
+
+    // keep behaviour: auto-upload on drop
     await handleFilesSelected(files);
   });
 }
@@ -677,7 +688,6 @@ function openDetails(file) {
     </div>
   `;
 
-  // Wire up buttons
   const renameInput = document.getElementById("renameInput");
   const renameBtn = document.getElementById("renameBtn");
   const moveInput = document.getElementById("moveInput");
@@ -699,7 +709,6 @@ function openDetails(file) {
         const updated = await renameFile(file.key, newName);
         showToast("File renamed ✅");
         await loadFileList();
-        // update currentDetailsFile to reflect new key/name
         currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
         closeDetails();
       } catch (err) {
@@ -775,7 +784,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (folderFilter) folderFilter.addEventListener("change", renderFileList);
   if (typeFilter) typeFilter.addEventListener("change", renderFileList);
 
-  // View mode
   if (gridViewBtn && listViewBtn) {
     const applyView = () => {
       gridViewBtn.classList.toggle("active", viewMode === "grid");
@@ -795,7 +803,6 @@ document.addEventListener("DOMContentLoaded", () => {
     applyView();
   }
 
-  // Chips
   chips.forEach((chip) => {
     chip.classList.toggle("chip-active", chip.dataset.chip === activeChip);
     chip.addEventListener("click", () => {
@@ -803,7 +810,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Queue clear
   if (clearQueueBtn && uploadQueue) {
     clearQueueBtn.addEventListener("click", () => {
       uploadQueueList.innerHTML = "";
@@ -811,10 +817,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Drag & drop
+  // 🔹 update list when user picks files via "browse"
+  if (fileInput) {
+    fileInput.addEventListener("change", () => {
+      showSelectedFiles(fileInput.files);
+    });
+  }
+
   setupDragAndDrop();
 
-  // Preview modal
   if (closePreviewBtn) {
     closePreviewBtn.addEventListener("click", closePreview);
   }
@@ -829,7 +840,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Details modal
   if (closeDetailsBtn) {
     closeDetailsBtn.addEventListener("click", closeDetails);
   }
@@ -844,12 +854,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Sidebar
   if (sidebarToggle) {
     sidebarToggle.addEventListener("click", toggleSidebar);
   }
 
-  // Favorites nav shortcut
   if (navFavorites) {
     navFavorites.addEventListener("click", () => {
       setActiveChip("favorites");
