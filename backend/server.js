@@ -8,24 +8,24 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// ======= HARD-CODE YOUR BUCKET + REGION HERE FOR NOW =======
-const BUCKET_NAME = "my-doc-upload-app-bucket";   // e.g. "study-drive-notes"
-const BUCKET_REGION = "ap-south-2";      // e.g. "ap-south-1"
+// ======= BUCKET CONFIG =======
+const BUCKET_NAME = "my-doc-upload-app-bucket";   // your bucket
+const BUCKET_REGION = "ap-south-2";              // your region
 
 aws.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,      // from env
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: BUCKET_REGION,
 });
 
 const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
-// ==========================================================
+// ==============================
 
 app.use(
   cors({
     origin: "*",
-    methods: ["GET", "POST", "DELETE"],
+    methods: ["GET", "POST", "DELETE", "PUT"],
   })
 );
 
@@ -34,10 +34,41 @@ app.use(express.json());
 // memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
 });
 
-// --------- ROUTES ---------
+// ---------- HELPERS ----------
+function safeFolderName(folderRaw) {
+  const trimmed = (folderRaw || "").trim();
+  if (!trimmed) return "root";
+  return trimmed.replace(/[^\w\-]/g, "_").toLowerCase();
+}
+
+// Copy object helper (for rename/move)
+async function copyObjectInBucket(oldKey, newKey) {
+  await S3.copyObject({
+    Bucket: S3_BUCKET,
+    CopySource: `${S3_BUCKET}/${oldKey}`,
+    Key: newKey,
+    ACL: "private",
+  }).promise();
+}
+
+async function deleteObjectInBucket(key) {
+  await S3.deleteObject({
+    Bucket: S3_BUCKET,
+    Key: key,
+  }).promise();
+}
+
+function makeSignedUrl(key, expiresSeconds = 60 * 60) {
+  return S3.getSignedUrl("getObject", {
+    Bucket: S3_BUCKET,
+    Key: key,
+    Expires: expiresSeconds,
+  });
+}
+// ------------------------------
 
 // Health check
 app.get("/", (req, res) => {
@@ -58,14 +89,14 @@ app.post("/upload", upload.single("document"), async (req, res) => {
     const file = req.file;
     const originalName = file.originalname || "file";
     const ext = path.extname(originalName);
-    const baseName = path.basename(originalName, ext).replace(/\s+/g, "_");
+    const baseName = path
+      .basename(originalName, ext)
+      .replace(/\s+/g, "_")
+      .toLowerCase();
     const timestamp = Date.now();
 
-    // 🔹 Folder from form (optional)
-    const rawFolder = (req.body && req.body.folder ? req.body.folder : "").trim();
-    let folderSafe = rawFolder || "root";
-    // make folder name safe: only letters, numbers, underscore, dash
-    folderSafe = folderSafe.replace(/[^\w\-]/g, "_").toLowerCase();
+    const rawFolder = (req.body && req.body.folder) || "";
+    const folderSafe = safeFolderName(rawFolder);
 
     // Store under uploads/<folder>/
     const key = `uploads/${folderSafe}/${baseName}-${timestamp}${ext}`;
@@ -75,16 +106,12 @@ app.post("/upload", upload.single("document"), async (req, res) => {
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
-      ACL: "private", // we use signed URLs
+      ACL: "private",
     };
 
     const result = await S3.upload(params).promise();
 
-    const signedUrl = S3.getSignedUrl("getObject", {
-      Bucket: S3_BUCKET,
-      Key: key,
-      Expires: 60 * 60, // 1 hour
-    });
+    const signedUrl = makeSignedUrl(key);
 
     res.json({
       message: "File uploaded successfully to S3!",
@@ -102,7 +129,9 @@ app.post("/upload", upload.single("document"), async (req, res) => {
     if (err.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({ message: "File too large" });
     }
-    res.status(500).json({ message: "Failed to upload file", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Failed to upload file", error: err.message });
   }
 });
 
@@ -122,27 +151,25 @@ app.get("/files", async (req, res) => {
     const data = await S3.listObjectsV2(params).promise();
 
     const files = (data.Contents || [])
-      .filter((obj) => obj.Key !== "uploads/") // skip the folder itself
+      .filter((obj) => obj.Key !== "uploads/")
       .map((obj) => {
-        const key = obj.Key; // e.g. "uploads/os/os-notes-1234.pdf"
+        const key = obj.Key;
 
         // Remove "uploads/" prefix
-        let relative = key.startsWith("uploads/") ? key.slice("uploads/".length) : key;
+        let relative = key.startsWith("uploads/")
+          ? key.slice("uploads/".length)
+          : key;
 
         const parts = relative.split("/");
         let folder = "root";
         let name = relative;
 
         if (parts.length > 1) {
-          folder = parts[0];             // e.g. "os"
-          name = parts.slice(1).join("/"); // e.g. "os-notes-1234.pdf"
+          folder = parts[0];
+          name = parts.slice(1).join("/");
         }
 
-        const signedUrl = S3.getSignedUrl("getObject", {
-          Bucket: S3_BUCKET,
-          Key: key,
-          Expires: 60 * 60,
-        });
+        const signedUrl = makeSignedUrl(key);
 
         return {
           name,
@@ -157,11 +184,13 @@ app.get("/files", async (req, res) => {
     res.json({ files });
   } catch (err) {
     console.error("Error listing files:", err);
-    res.status(500).json({ message: "Failed to list files", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Failed to list files", error: err.message });
   }
 });
 
-// OPTIONAL: Delete file endpoint (not used yet by frontend, but ready)
+// Delete file
 app.delete("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
@@ -173,11 +202,131 @@ app.delete("/files", async (req, res) => {
       return res.status(400).json({ message: "Missing 'key' in request body" });
     }
 
-    await S3.deleteObject({ Bucket: S3_BUCKET, Key: key }).promise();
+    await deleteObjectInBucket(key);
     res.json({ message: "File deleted", key });
   } catch (err) {
     console.error("Error deleting file:", err);
-    res.status(500).json({ message: "Failed to delete file", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Failed to delete file", error: err.message });
+  }
+});
+
+// NEW: Download endpoint (returns a signed URL optimized for download)
+app.get("/files/download", async (req, res) => {
+  try {
+    const key = req.query.key;
+    if (!key) {
+      return res.status(400).json({ message: "Missing 'key' query param" });
+    }
+
+    if (!S3_BUCKET) {
+      return res.status(500).json({ message: "S3 bucket not configured" });
+    }
+
+    const url = S3.getSignedUrl("getObject", {
+      Bucket: S3_BUCKET,
+      Key: key,
+      Expires: 60 * 60,
+      ResponseContentDisposition: "attachment", // force download
+    });
+
+    res.json({ url });
+  } catch (err) {
+    console.error("Download URL error:", err);
+    res
+      .status(500)
+      .json({ message: "Failed to generate download URL", error: err.message });
+  }
+});
+
+// NEW: Rename file (within same folder)
+app.put("/files/rename", async (req, res) => {
+  try {
+    const { key, newName } = req.body || {};
+    if (!key || !newName) {
+      return res.status(400).json({ message: "Missing 'key' or 'newName'" });
+    }
+
+    if (!S3_BUCKET) {
+      return res.status(500).json({ message: "S3 bucket not configured" });
+    }
+
+    // key: uploads/<folder>/<name.ext>
+    const keyParts = key.split("/");
+    if (keyParts.length < 3) {
+      return res.status(400).json({ message: "Invalid key format" });
+    }
+
+    const folder = keyParts[1]; // uploads/<folder>/...
+    const ext = path.extname(key);
+    const safeNewBase = newName.replace(/\s+/g, "_").toLowerCase();
+    const newKey = `uploads/${folder}/${safeNewBase}${ext}`;
+
+    // Copy then delete old
+    await copyObjectInBucket(key, newKey);
+    await deleteObjectInBucket(key);
+
+    const signedUrl = makeSignedUrl(newKey);
+
+    res.json({
+      message: "File renamed",
+      file: {
+        key: newKey,
+        name: `${safeNewBase}${ext}`,
+        folder,
+        url: signedUrl,
+      },
+    });
+  } catch (err) {
+    console.error("Rename error:", err);
+    res
+      .status(500)
+      .json({ message: "Failed to rename file", error: err.message });
+  }
+});
+
+// NEW: Move file to another folder
+app.put("/files/move", async (req, res) => {
+  try {
+    const { key, newFolder } = req.body || {};
+    if (!key || !newFolder) {
+      return res.status(400).json({ message: "Missing 'key' or 'newFolder'" });
+    }
+
+    if (!S3_BUCKET) {
+      return res.status(500).json({ message: "S3 bucket not configured" });
+    }
+
+    const folderSafe = safeFolderName(newFolder);
+
+    const keyParts = key.split("/");
+    if (keyParts.length < 3) {
+      return res.status(400).json({ message: "Invalid key format" });
+    }
+
+    const filename = keyParts[keyParts.length - 1]; // last part
+    const newKey = `uploads/${folderSafe}/${filename}`;
+
+    await copyObjectInBucket(key, newKey);
+    await deleteObjectInBucket(key);
+
+    const signedUrl = makeSignedUrl(newKey);
+
+    res.json({
+      message: "File moved",
+      file: {
+        key: newKey,
+        name: filename,
+        folder: folderSafe,
+        url: signedUrl,
+      },
+    });
+  } catch (err) {
+    console.error("Move error:", err);
+    res
+      .status(500)
+      .json({ message: "Failed to move file", error: err.message });
   }
 });
 
