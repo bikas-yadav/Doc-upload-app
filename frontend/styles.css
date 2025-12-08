@@ -34,6 +34,8 @@ body {
   background: radial-gradient(circle at top, #0b1120 0, #020617 52%, #000 100%);
   color: var(--text);
   min-height: 100vh;
+  /* ⭐ NEW: avoid horizontal scrollbars on small screens */
+  overflow-x: hidden;
 }
 
 button {
@@ -63,6 +65,8 @@ button {
   top: 0;
   height: 100vh;
   z-index: 40;
+  /* ⭐ NEW: scroll inside sidebar if content is tall */
+  overflow-y: auto;
 }
 
 .sidebar-header {
@@ -715,6 +719,9 @@ button {
   min-height: 140px;
   font-size: 13px;
   position: relative;
+  /* ⭐ NEW: scroll inside list instead of stretching whole page */
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 /* Loading skeleton */
@@ -945,6 +952,8 @@ button {
   padding: 10px 10px 14px;
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.95);
   border: 1px solid rgba(148, 163, 184, 0.7);
+  /* ⭐ NEW: make sure it fits on small screens */
+  width: min(900px, 96vw);
 }
 
 .close-btn {
@@ -1033,6 +1042,11 @@ button {
 
   .top-right {
     display: none;
+  }
+
+  /* ⭐ NEW: modal more compact on phones */
+  .modal-content {
+    margin: 20px auto;
   }
 }
 
