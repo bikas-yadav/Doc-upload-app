@@ -249,6 +249,11 @@
                 Click to preview PDFs &amp; images, or open / download the file.
               </p>
             </div>
+            <div class="right-header-actions">
+              <button type="button" id="newFolderBtn" class="secondary-btn small-btn">
+                + New folder
+              </button>
+            </div>
           </header>
 
           <div id="fileList" class="file-list file-list--loading">
@@ -283,6 +288,26 @@
       </button>
       <div id="detailsBody" class="preview-body">
         <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- New folder modal (frontend-only helper) -->
+  <div id="folderModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button id="closeFolderModalBtn" class="close-btn" aria-label="Close new folder">
+        &times;
+      </button>
+      <div class="preview-body">
+        <h3 style="margin:0 0 6px;font-size:15px;">Set upload folder</h3>
+        <p class="small muted" style="margin:0 0 10px;">
+          Choose a folder name. It will be created automatically when you upload a file to it.
+        </p>
+        <input id="folderNameInputModal" type="text" class="text-input" placeholder="e.g. semester-5, os, dbms" />
+        <button id="createFolderConfirmBtn" type="button" class="primary-btn full-width" style="margin-top:10px;">
+          Use this folder for uploads
+        </button>
       </div>
     </div>
   </div>

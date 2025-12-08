@@ -1,5 +1,5 @@
 // ===== Config =====
-const BACKEND_URL = "https://doc-upload-app.onrender.com"; // 🔁 change if your backend URL is different
+const BACKEND_URL = "https://doc-upload-app.onrender.com"; // change if needed
 
 // ===== Admin token helpers =====
 function getAdminToken() {
@@ -49,6 +49,13 @@ const detailsModal = document.getElementById("detailsModal");
 const detailsBody = document.getElementById("detailsBody");
 const closeDetailsBtn = document.getElementById("closeDetailsBtn");
 const selectedFilesList = document.getElementById("selectedFilesList");
+
+// New folder UI
+const newFolderBtn = document.getElementById("newFolderBtn");
+const folderModal = document.getElementById("folderModal");
+const folderNameInputModal = document.getElementById("folderNameInputModal");
+const closeFolderModalBtn = document.getElementById("closeFolderModalBtn");
+const createFolderConfirmBtn = document.getElementById("createFolderConfirmBtn");
 
 // Login-related DOM
 const adminLogin = document.getElementById("adminLogin");
@@ -129,11 +136,9 @@ function updateStats() {
   const storageLimitBytes = 1024 * 1024 * 1024; // fake 1 GB limit
 
   if (fileCountSpan) fileCountSpan.textContent = `${count}`;
-  if (totalSizeSpan)
-    totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
+  if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
   if (totalSizeSidebarSpan)
-    totalSizeSidebarSpan.textContent =
-      formatSize(totalBytes) || "0 KB";
+    totalSizeSidebarSpan.textContent = formatSize(totalBytes) || "0 KB";
 
   const percentage = Math.min(
     100,
@@ -366,9 +371,7 @@ function getFilteredFiles() {
   }
 
   if (query) {
-    files = files.filter((f) =>
-      (f.name || "").toLowerCase().includes(query)
-    );
+    files = files.filter((f) => (f.name || "").toLowerCase().includes(query));
   }
 
   files.sort((a, b) => {
@@ -439,26 +442,36 @@ function renderFileList() {
       const isFav = favoriteKeys.includes(file.key);
 
       return `
-        <div class="file-item" data-url="${file.url}" data-type="${typeClass}" data-key="${file.key}">
+        <div
+          class="file-item"
+          data-url="${file.url}"
+          data-type="${typeClass}"
+          data-key="${file.key}"
+        >
           <div class="file-icon ${typeClass}">${iconText}</div>
           <div class="file-main">
             <p class="file-name" title="${file.name || ""}">
               ${file.name || "Untitled file"}
             </p>
             <p class="file-meta">
-              [${folderText}] · ${sizeText || ""}${
-        sizeText && dateText ? " · " : ""
-      }${dateText || ""}
+              [${folderText}] · ${sizeText || ""}${sizeText && dateText ? " · " : ""
+        }${dateText || ""}
             </p>
           </div>
           <div class="file-actions">
-            <button type="button" class="favorite-btn ${
-              isFav ? "is-favorite" : ""
-            }" title="Favorite">
+            <button
+              type="button"
+              class="favorite-btn ${isFav ? "is-favorite" : ""}"
+              title="Favorite"
+            >
               ${isFav ? "★" : "☆"}
             </button>
             <button type="button" class="preview-btn">Preview</button>
-            <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
+            <a
+              href="${file.url}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open</a>
             <button type="button" class="download-btn">Download</button>
             <button type="button" class="details-btn">Details</button>
             <button type="button" class="delete-btn">Delete</button>
@@ -690,9 +703,11 @@ function openPreview(url, type) {
   previewBody.innerHTML = "";
 
   if (type === "pdf") {
-    previewBody.innerHTML = `<iframe src="${url}" title="PDF preview"></iframe>`;
+    previewBody.innerHTML =
+      `<iframe src="${url}" title="PDF preview"></iframe>`;
   } else if (type === "image") {
-    previewBody.innerHTML = `<img src="${url}" alt="Image preview" />`;
+    previewBody.innerHTML =
+      `<img src="${url}" alt="Image preview" />`;
   } else {
     previewBody.innerHTML = `
       <p>This file type cannot be previewed here. You can open it in a new tab:</p>
@@ -737,28 +752,52 @@ function openDetails(file) {
       <div>
         <label style="font-size:12px;display:block;margin-bottom:2px;">Rename</label>
         <div style="display:flex;gap:6px;">
-          <input id="renameInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" value="${
-            file.name.replace(/\.[^/.]+$/, "") || ""
-          }" />
-          <button id="renameBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#4f46e5;color:#e5e7eb;font-size:12px;cursor:pointer;">Save</button>
+          <input
+            id="renameInput"
+            type="text"
+            style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;"
+            value="${file.name.replace(/\.[^/.]+$/, "") || ""}"
+          />
+          <button
+            id="renameBtn"
+            type="button"
+            style="padding:6px 10px;border-radius:999px;border:none;background:#4f46e5;color:#e5e7eb;font-size:12px;cursor:pointer;"
+          >Save</button>
         </div>
       </div>
 
       <div>
         <label style="font-size:12px;display:block;margin-bottom:2px;">Move to folder</label>
         <div style="display:flex;gap:6px;">
-          <input id="moveInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" placeholder="e.g. semester-5, os" />
-          <button id="moveBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#10b981;color:#022c22;font-size:12px;cursor:pointer;">Move</button>
+          <input
+            id="moveInput"
+            type="text"
+            style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;"
+            placeholder="e.g. semester-5, os"
+          />
+          <button
+            id="moveBtn"
+            type="button"
+            style="padding:6px 10px;border-radius:999px;border:none;background:#10b981;color:#022c22;font-size:12px;cursor:pointer;"
+          >Move</button>
         </div>
       </div>
 
       <div>
         <label style="font-size:12px;display:block;margin-bottom:2px;">Share / open link</label>
         <div style="display:flex;gap:6px;">
-          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${
-            file.url
-          }" />
-          <button id="copyLinkBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#111827;color:#e5e7eb;font-size:12px;cursor:pointer;">Copy</button>
+          <input
+            id="linkInput"
+            type="text"
+            readonly
+            style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;"
+            value="${file.url}"
+          />
+          <button
+            id="copyLinkBtn"
+            type="button"
+            style="padding:6px 10px;border-radius:999px;border:none;background:#111827;color:#e5e7eb;font-size:12px;cursor:pointer;"
+          >Copy</button>
         </div>
       </div>
     </div>
@@ -857,6 +896,31 @@ function setActiveChip(name) {
   renderFileList();
 }
 
+// ===== Folder modal helpers (frontend-only) =====
+function openFolderModal() {
+  if (!folderModal || !folderNameInputModal) return;
+  folderNameInputModal.value = folderInput?.value || "";
+  folderModal.classList.remove("hidden");
+  folderNameInputModal.focus();
+}
+
+function closeFolderModal() {
+  if (!folderModal) return;
+  folderModal.classList.add("hidden");
+}
+
+function applyFolderFromModal() {
+  if (!folderNameInputModal || !folderInput) return;
+  const name = (folderNameInputModal.value || "").trim();
+  if (!name) {
+    showToast("Folder name cannot be empty");
+    return;
+  }
+  folderInput.value = name;
+  closeFolderModal();
+  showToast(`Folder set to "${name}". Uploads will go there.`);
+}
+
 // ===== Admin app init =====
 function initAdminApp() {
   showAdminApp();
@@ -948,6 +1012,35 @@ function initAdminApp() {
     });
   }
 
+  // New folder events (frontend-only)
+  if (newFolderBtn) {
+    newFolderBtn.addEventListener("click", openFolderModal);
+  }
+  if (closeFolderModalBtn) {
+    closeFolderModalBtn.addEventListener("click", closeFolderModal);
+  }
+  if (folderModal) {
+    folderModal.addEventListener("click", (e) => {
+      if (
+        e.target === folderModal ||
+        e.target.classList.contains("modal-backdrop")
+      ) {
+        closeFolderModal();
+      }
+    });
+  }
+  if (createFolderConfirmBtn) {
+    createFolderConfirmBtn.addEventListener("click", applyFolderFromModal);
+  }
+  if (folderNameInputModal) {
+    folderNameInputModal.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyFolderFromModal();
+      }
+    });
+  }
+
   loadFileList();
 }
 
@@ -971,9 +1064,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       setAdminToken(token);
-      // We don't pre-validate with a special endpoint;
-      // if it's wrong, protected calls (upload/delete/rename/move)
-      // will return 403 and we show login again.
+      // If it's wrong, protected calls (upload/delete/rename/move) will 403
       initAdminApp();
       adminTokenInput.value = "";
       if (adminLoginError) adminLoginError.style.display = "none";
