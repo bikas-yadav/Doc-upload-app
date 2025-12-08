@@ -4,7 +4,7 @@ const cors = require("cors");
 const multer = require("multer");
 const aws = require("aws-sdk");
 const path = require("path");
-const compression = require("compression"); // ✅ NEW
+const compression = require("compression"); // ✅
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -21,6 +21,10 @@ aws.config.update({
 
 const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
+
+// ✅ ADMIN TOKEN (set this in Render env vars)
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
 // ==============================
 
 app.use(
@@ -44,6 +48,25 @@ function safeFolderName(folderRaw) {
   const trimmed = (folderRaw || "").trim();
   if (!trimmed) return "root";
   return trimmed.replace(/[^\w\-]/g, "_").toLowerCase();
+}
+
+// ✅ Simple admin auth middleware
+function requireAdmin(req, res, next) {
+  const token =
+    req.headers["x-admin-token"] ||
+    req.headers["authorization"]?.replace("Bearer ", "") ||
+    req.query.adminToken;
+
+  if (!ADMIN_TOKEN) {
+    console.error("ADMIN_TOKEN not set in environment!");
+    return res.status(500).json({ message: "Server admin not configured" });
+  }
+
+  if (!token || token !== ADMIN_TOKEN) {
+    return res.status(403).json({ message: "Forbidden: admin only" });
+  }
+
+  next();
 }
 
 // Copy object helper (for rename/move)
@@ -82,8 +105,9 @@ app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
-// Upload endpoint: expects form field name "document"
-app.post("/upload", upload.single("document"), async (req, res) => {
+// 🔒 Upload endpoint: only admin can upload
+// expects form field name "document"
+app.post("/upload", requireAdmin, upload.single("document"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
@@ -161,8 +185,7 @@ app.post("/upload", upload.single("document"), async (req, res) => {
   }
 });
 
-// ✅ List files endpoint with pagination & optional folder filter:
-// GET /files?limit=50&continuationToken=...&folder=myfolder
+// ✅ List files: PUBLIC (read-only)
 app.get("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
@@ -233,8 +256,8 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// Delete file
-app.delete("/files", async (req, res) => {
+// 🔒 Delete file: only admin
+app.delete("/files", requireAdmin, async (req, res) => {
   try {
     if (!S3_BUCKET) {
       return res.status(500).json({ message: "S3 bucket not configured" });
@@ -255,7 +278,7 @@ app.delete("/files", async (req, res) => {
   }
 });
 
-// Download endpoint (returns a signed URL optimized for download)
+// ✅ Download endpoint: PUBLIC (read-only)
 app.get("/files/download", async (req, res) => {
   try {
     const key = req.query.key;
@@ -283,8 +306,8 @@ app.get("/files/download", async (req, res) => {
   }
 });
 
-// Rename file (within same folder)
-app.put("/files/rename", async (req, res) => {
+// 🔒 Rename file (within same folder): only admin
+app.put("/files/rename", requireAdmin, async (req, res) => {
   try {
     const { key, newName } = req.body || {};
     if (!key || !newName) {
@@ -329,8 +352,8 @@ app.put("/files/rename", async (req, res) => {
   }
 });
 
-// Move file to another folder
-app.put("/files/move", async (req, res) => {
+// 🔒 Move file to another folder: only admin
+app.put("/files/move", requireAdmin, async (req, res) => {
   try {
     const { key, newFolder } = req.body || {};
     if (!key || !newFolder) {
