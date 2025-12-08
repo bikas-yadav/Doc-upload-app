@@ -1,6 +1,21 @@
 // ===== Config =====
-const BACKEND_URL = "https://doc-upload-app.onrender.com"; // your backend
-const ADMIN_TOKEN = "THE_SAME_TOKEN_AS_IN_RENDER"; // 🔒
+const BACKEND_URL = "https://doc-upload-app.onrender.com"; // 🔁 change if your backend URL is different
+
+// ===== Admin token helpers =====
+function getAdminToken() {
+  return window.ADMIN_TOKEN || localStorage.getItem("adminToken") || "";
+}
+
+function setAdminToken(token) {
+  window.ADMIN_TOKEN = token;
+  localStorage.setItem("adminToken", token);
+}
+
+function clearAdminToken() {
+  window.ADMIN_TOKEN = "";
+  localStorage.removeItem("adminToken");
+}
+
 // ===== DOM =====
 const form = document.getElementById("uploadForm");
 const statusDiv = document.getElementById("status");
@@ -33,9 +48,14 @@ const navFavorites = document.getElementById("navFavorites");
 const detailsModal = document.getElementById("detailsModal");
 const detailsBody = document.getElementById("detailsBody");
 const closeDetailsBtn = document.getElementById("closeDetailsBtn");
-
-// 🔹 NEW: list under drop zone to show selected/dropped files
 const selectedFilesList = document.getElementById("selectedFilesList");
+
+// Login-related DOM
+const adminLogin = document.getElementById("adminLogin");
+const adminApp = document.getElementById("adminApp");
+const adminLoginForm = document.getElementById("adminLoginForm");
+const adminTokenInput = document.getElementById("adminTokenInput");
+const adminLoginError = document.getElementById("adminLoginError");
 
 // ===== State =====
 let allFiles = [];
@@ -109,9 +129,11 @@ function updateStats() {
   const storageLimitBytes = 1024 * 1024 * 1024; // fake 1 GB limit
 
   if (fileCountSpan) fileCountSpan.textContent = `${count}`;
-  if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
+  if (totalSizeSpan)
+    totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
   if (totalSizeSidebarSpan)
-    totalSizeSidebarSpan.textContent = formatSize(totalBytes) || "0 KB";
+    totalSizeSidebarSpan.textContent =
+      formatSize(totalBytes) || "0 KB";
 
   const percentage = Math.min(
     100,
@@ -133,7 +155,7 @@ function updateFolderFilterOptions() {
     folders.map((f) => `<option value="${f}">${f}</option>`).join("");
 }
 
-// 🔹 NEW: show list of selected / dropped files under drop zone
+// Show list of selected / dropped files
 function showSelectedFiles(filesList) {
   if (!selectedFilesList) return;
   const files = Array.from(filesList || []);
@@ -144,6 +166,25 @@ function showSelectedFiles(filesList) {
   selectedFilesList.innerHTML = files
     .map((f) => `<li title="${f.name}">${f.name}</li>`)
     .join("");
+}
+
+// ===== Login / App visibility =====
+function showAdminApp() {
+  if (adminLogin) adminLogin.classList.add("hidden");
+  if (adminApp) adminApp.classList.remove("hidden");
+}
+
+function showLogin(errorMsg) {
+  if (adminApp) adminApp.classList.add("hidden");
+  if (adminLogin) adminLogin.classList.remove("hidden");
+  if (adminLoginError) {
+    if (errorMsg) {
+      adminLoginError.style.display = "block";
+      adminLoginError.textContent = errorMsg;
+    } else {
+      adminLoginError.style.display = "none";
+    }
+  }
 }
 
 // ===== API: load/delete/download/rename/move =====
@@ -202,7 +243,7 @@ async function deleteFile(key) {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": ADMIN_TOKEN, // 🔒 admin only
+        "x-admin-token": getAdminToken(),
       },
       body: JSON.stringify({ key }),
     });
@@ -213,6 +254,12 @@ async function deleteFile(key) {
       data = JSON.parse(text);
     } catch {
       data = { message: text };
+    }
+
+    if (res.status === 403) {
+      clearAdminToken();
+      showLogin("Admin token invalid or expired. Please login again.");
+      return;
     }
 
     if (!res.ok) {
@@ -236,34 +283,36 @@ async function handleDownload(key) {
     const res = await fetch(
       `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`
     );
-
     const data = await res.json();
-
-    if (!res.ok || !data.url) {
-      console.error("Download error response:", data);
-      showToast(data.message || "Download failed");
-      return;
+    if (data && data.url) {
+      window.location.href = data.url;
+    } else {
+      showToast("Download link not available");
     }
-
-    // Go directly to the signed S3 URL
-    window.location.href = data.url;
   } catch (err) {
     console.error("Download error:", err);
     showToast("Download failed");
   }
 }
 
-
 async function renameFile(key, newName) {
   const res = await fetch(`${BACKEND_URL}/files/rename`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      "x-admin-token": ADMIN_TOKEN, // 🔒 admin only
+      "x-admin-token": getAdminToken(),
     },
     body: JSON.stringify({ key, newName }),
   });
+
   const data = await res.json();
+
+  if (res.status === 403) {
+    clearAdminToken();
+    showLogin("Admin token invalid or expired. Please login again.");
+    throw new Error("Forbidden");
+  }
+
   if (!res.ok) {
     throw new Error(data.message || "Rename failed");
   }
@@ -275,17 +324,23 @@ async function moveFile(key, newFolder) {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      "x-admin-token": ADMIN_TOKEN, // 🔒 admin only
+      "x-admin-token": getAdminToken(),
     },
     body: JSON.stringify({ key, newFolder }),
   });
   const data = await res.json();
+
+  if (res.status === 403) {
+    clearAdminToken();
+    showLogin("Admin token invalid or expired. Please login again.");
+    throw new Error("Forbidden");
+  }
+
   if (!res.ok) {
     throw new Error(data.message || "Move failed");
   }
   return data.file;
 }
-
 
 // ===== Filtering / View =====
 function getFilteredFiles() {
@@ -391,13 +446,15 @@ function renderFileList() {
               ${file.name || "Untitled file"}
             </p>
             <p class="file-meta">
-              [${folderText}] · ${sizeText || ""}${sizeText && dateText ? " · " : ""
-        }${dateText || ""}
+              [${folderText}] · ${sizeText || ""}${
+        sizeText && dateText ? " · " : ""
+      }${dateText || ""}
             </p>
           </div>
           <div class="file-actions">
-            <button type="button" class="favorite-btn ${isFav ? "is-favorite" : ""
-        }" title="Favorite">
+            <button type="button" class="favorite-btn ${
+              isFav ? "is-favorite" : ""
+            }" title="Favorite">
               ${isFav ? "★" : "☆"}
             </button>
             <button type="button" class="preview-btn">Preview</button>
@@ -511,7 +568,7 @@ async function uploadSingleFile(file, folder) {
     const res = await fetch(`${BACKEND_URL}/upload`, {
       method: "POST",
       headers: {
-        "x-admin-token": ADMIN_TOKEN, // 🔒 admin only
+        "x-admin-token": getAdminToken(),
       },
       body: formData,
     });
@@ -524,12 +581,17 @@ async function uploadSingleFile(file, folder) {
       data = { message: rawText };
     }
 
-    if (!res.ok) {
-      updateQueueItemStatus(
-        queueItemEl,
-        data.message || "Failed",
-        "error"
+    if (res.status === 403) {
+      updateQueueItemStatus(queueItemEl, "Forbidden", "error");
+      clearAdminToken();
+      showLogin(
+        "Admin token invalid or expired during upload. Please login again."
       );
+      return;
+    }
+
+    if (!res.ok) {
+      updateQueueItemStatus(queueItemEl, data.message || "Failed", "error");
       showToast(`Upload failed: ${file.name}`);
       return;
     }
@@ -567,9 +629,6 @@ async function handleFilesSelected(filesList) {
   showToast("Upload complete ✅");
 
   if (fileInput) fileInput.value = "";
-
-  // 🔹 clear list under drop zone after upload
-  // showSelectedFiles([]);
 
   await loadFileList();
 }
@@ -611,15 +670,12 @@ function setupDragAndDrop() {
     const dt = e.dataTransfer;
     const files = dt.files;
 
-    // 🔹 show names in the list
     showSelectedFiles(files);
 
-    // optional: sync to hidden file input so form submit sees them
     const dataTransfer = new DataTransfer();
     Array.from(files).forEach((f) => dataTransfer.items.add(f));
     fileInput.files = dataTransfer.files;
 
-    // keep behaviour: auto-upload on drop
     await handleFilesSelected(files);
   });
 }
@@ -681,7 +737,9 @@ function openDetails(file) {
       <div>
         <label style="font-size:12px;display:block;margin-bottom:2px;">Rename</label>
         <div style="display:flex;gap:6px;">
-          <input id="renameInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" value="${file.name.replace(/\.[^/.]+$/, "")}" />
+          <input id="renameInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" value="${
+            file.name.replace(/\.[^/.]+$/, "") || ""
+          }" />
           <button id="renameBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#4f46e5;color:#e5e7eb;font-size:12px;cursor:pointer;">Save</button>
         </div>
       </div>
@@ -697,7 +755,9 @@ function openDetails(file) {
       <div>
         <label style="font-size:12px;display:block;margin-bottom:2px;">Share / open link</label>
         <div style="display:flex;gap:6px;">
-          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${file.url}" />
+          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${
+            file.url
+          }" />
           <button id="copyLinkBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#111827;color:#e5e7eb;font-size:12px;cursor:pointer;">Copy</button>
         </div>
       </div>
@@ -725,11 +785,14 @@ function openDetails(file) {
         const updated = await renameFile(file.key, newName);
         showToast("File renamed ✅");
         await loadFileList();
-        currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
+        currentDetailsFile =
+          allFiles.find((f) => f.key === updated.key) || null;
         closeDetails();
       } catch (err) {
         console.error("Rename error:", err);
-        showToast("Rename failed");
+        if (err.message !== "Forbidden") {
+          showToast("Rename failed");
+        }
       }
     });
   }
@@ -745,11 +808,14 @@ function openDetails(file) {
         const updated = await moveFile(file.key, newFolder);
         showToast("File moved ✅");
         await loadFileList();
-        currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
+        currentDetailsFile =
+          allFiles.find((f) => f.key === updated.key) || null;
         closeDetails();
       } catch (err) {
         console.error("Move error:", err);
-        showToast("Move failed");
+        if (err.message !== "Forbidden") {
+          showToast("Move failed");
+        }
       }
     });
   }
@@ -791,8 +857,10 @@ function setActiveChip(name) {
   renderFileList();
 }
 
-// ===== Init =====
-document.addEventListener("DOMContentLoaded", () => {
+// ===== Admin app init =====
+function initAdminApp() {
+  showAdminApp();
+
   if (form) form.addEventListener("submit", handleUpload);
 
   if (searchInput) searchInput.addEventListener("input", renderFileList);
@@ -833,7 +901,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // 🔹 update list when user picks files via "browse"
   if (fileInput) {
     fileInput.addEventListener("change", () => {
       showSelectedFiles(fileInput.files);
@@ -880,5 +947,36 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast("Showing favorite files ⭐");
     });
   }
+
   loadFileList();
+}
+
+// ===== Init (login + app) =====
+document.addEventListener("DOMContentLoaded", () => {
+  // Try auto-login with stored token
+  const savedToken = getAdminToken();
+  if (savedToken) {
+    setAdminToken(savedToken);
+    initAdminApp();
+  } else {
+    showLogin();
+  }
+
+  if (adminLoginForm && adminTokenInput) {
+    adminLoginForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const token = adminTokenInput.value.trim();
+      if (!token) {
+        showLogin("Token cannot be empty");
+        return;
+      }
+      setAdminToken(token);
+      // We don't pre-validate with a special endpoint;
+      // if it's wrong, protected calls (upload/delete/rename/move)
+      // will return 403 and we show login again.
+      initAdminApp();
+      adminTokenInput.value = "";
+      if (adminLoginError) adminLoginError.style.display = "none";
+    });
+  }
 });

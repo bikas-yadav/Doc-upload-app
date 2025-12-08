@@ -4,12 +4,40 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Study Drive</title>
+  <title>My Study Drive – Admin</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-  <div class="app-root">
+  <!-- ================= ADMIN LOGIN ================= -->
+  <div id="adminLogin" class="admin-login">
+    <div class="admin-login-card">
+      <h1 class="admin-login-title">My Study Drive – Admin</h1>
+      <p class="admin-login-subtitle">
+        Enter your admin token to upload, delete, and manage files.
+      </p>
+
+      <form id="adminLoginForm" class="admin-login-form">
+        <label class="field-label">
+          <span class="field-title">Admin token</span>
+          <span class="field-hint">Same value as ADMIN_TOKEN in your Render backend</span>
+        </label>
+        <input type="password" id="adminTokenInput" class="text-input" placeholder="Paste your secret admin token"
+          required />
+
+        <button type="submit" class="primary-btn" style="margin-top:10px;">
+          Unlock admin panel
+        </button>
+
+        <div id="adminLoginError" class="status-message error" style="display:none;margin-top:8px;">
+          Invalid token or server unreachable. Please try again.
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MAIN ADMIN APP ================= -->
+  <div id="adminApp" class="app-root hidden">
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
@@ -17,7 +45,7 @@
           <div class="sidebar-icon">SD</div>
           <div class="sidebar-text">
             <span class="sidebar-title">My Study Drive</span>
-            <span class="sidebar-subtitle">Study. Store. Repeat.</span>
+            <span class="sidebar-subtitle">Admin dashboard</span>
           </div>
         </div>
         <button id="sidebarToggle" class="sidebar-toggle" aria-label="Toggle menu">
@@ -62,7 +90,7 @@
           <div class="user-avatar">BY</div>
           <div class="user-info">
             <span class="user-name">Bikash</span>
-            <span class="user-tag">Student · Dev</span>
+            <span class="user-tag">Admin · Dev</span>
           </div>
         </div>
       </div>
@@ -73,7 +101,7 @@
       <!-- Top bar -->
       <header class="top-bar">
         <div class="top-left">
-          <h1 class="page-title">Dashboard</h1>
+          <h1 class="page-title">Admin dashboard</h1>
           <p class="page-subtitle">Upload, organize & review all your notes in one place.</p>
         </div>
         <div class="top-right">
@@ -115,8 +143,8 @@
                   </div>
                 </div>
               </div>
-              <ul id="selectedFilesList" 
-              class="selected-files"></ul>
+              <ul id="selectedFilesList" class="selected-files"></ul>
+
               <!-- Folder -->
               <label for="folderInput" class="field-label">
                 <span class="field-title">Folder (optional)</span>
@@ -183,7 +211,7 @@
                 </div>
               </div>
 
-              <!-- optional extra type dropdown (JS treats it as optional) -->
+              <!-- optional extra type dropdown -->
               <div class="filter-row">
                 <div class="filter-group">
                   <label for="typeFilter">Type (extra filter)</label>
