@@ -4,14 +4,15 @@ const cors = require("cors");
 const multer = require("multer");
 const aws = require("aws-sdk");
 const path = require("path");
-const compression = require("compression"); // ✅
+const compression = require("compression");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // ======= BUCKET CONFIG =======
-const BUCKET_NAME = "my-doc-upload-app-bucket";   // your bucket
-const BUCKET_REGION = "ap-south-2";              // your region
+// You can keep this hard-coded or move to env if you want.
+const BUCKET_NAME = "my-doc-upload-app-bucket";
+const BUCKET_REGION = "ap-south-2";
 
 aws.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -22,7 +23,7 @@ aws.config.update({
 const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
 
-// ✅ ADMIN TOKEN (set this in Render env vars)
+// ✅ ADMIN TOKEN (set this in Render environment variables)
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
 // ==============================
@@ -35,9 +36,9 @@ app.use(
 );
 
 app.use(express.json());
-app.use(compression()); // ✅ compress all responses
+app.use(compression()); // compress all responses
 
-// memory storage
+// memory storage for uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
@@ -50,12 +51,11 @@ function safeFolderName(folderRaw) {
   return trimmed.replace(/[^\w\-]/g, "_").toLowerCase();
 }
 
-// ✅ Simple admin auth middleware
+// Simple admin auth middleware
 function requireAdmin(req, res, next) {
   const token =
     req.headers["x-admin-token"] ||
-    req.headers["authorization"]?.replace("Bearer ", "") ||
-    req.query.adminToken;
+    (req.headers["authorization"] || "").replace("Bearer ", "");
 
   if (!ADMIN_TOKEN) {
     console.error("ADMIN_TOKEN not set in environment!");
@@ -100,90 +100,87 @@ app.get("/", (req, res) => {
   res.send("Study Drive backend (S3) is running ✅");
 });
 
-// ✅ Dedicated health check (for UptimeRobot / Render pings)
+// Dedicated health check
 app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
 // 🔒 Upload endpoint: only admin can upload
 // expects form field name "document"
-app.post("/upload", requireAdmin, upload.single("document"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
-
-    const file = req.file;
-    const originalName = file.originalname || "file";
-    const ext = path.extname(originalName);
-    let baseName = path.basename(originalName, ext)
-      .replace(/\s+/g, "_")
-      .replace(/[^\w\-]/g, "_");
-
-    // Folder from form
-    const rawFolder = (req.body && req.body.folder ? req.body.folder : "").trim();
-    let folderSafe = rawFolder || "root";
-    folderSafe = folderSafe.replace(/[^\w\-]/g, "_").toLowerCase();
-
-    // Start with clean filename
-    let finalName = `${baseName}${ext}`;
-    let key = `uploads/${folderSafe}/${finalName}`;
-
-    // 🔥 AUTO-INCREMENT LOGIC
-    let counter = 1;
-    while (true) {
-      try {
-        // Check if key exists
-        await S3.headObject({ Bucket: S3_BUCKET, Key: key }).promise();
-
-        // If it exists → generate next name
-        finalName = `${baseName}(${counter})${ext}`;
-        key = `uploads/${folderSafe}/${finalName}`;
-        counter++;
-
-      } catch (err) {
-        // If headObject throws → file does not exist → break loop
-        break;
+app.post(
+  "/upload",
+  requireAdmin,
+  upload.single("document"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
       }
-    }
 
-    // Upload to S3
-    const params = {
-      Bucket: S3_BUCKET,
-      Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype,
-      ACL: "private"
-    };
+      const file = req.file;
+      const originalName = file.originalname || "file";
+      const ext = path.extname(originalName);
+      let baseName = path
+        .basename(originalName, ext)
+        .replace(/\s+/g, "_")
+        .replace(/[^\w\-]/g, "_");
 
-    await S3.upload(params).promise();
+      // Folder from form
+      const rawFolder =
+        req.body && req.body.folder ? req.body.folder : "";
+      let folderSafe = rawFolder || "root";
+      folderSafe = safeFolderName(folderSafe);
 
-    // Signed URL
-    const signedUrl = S3.getSignedUrl("getObject", {
-      Bucket: S3_BUCKET,
-      Key: key,
-      Expires: 3600
-    });
+      // Start with clean filename
+      let finalName = `${baseName}${ext}`;
+      let key = `uploads/${folderSafe}/${finalName}`;
 
-    res.json({
-      message: "File uploaded successfully!",
-      file: {
-        originalName: finalName,
-        key,
-        size: file.size,
-        folder: folderSafe,
-        url: signedUrl
+      // AUTO-INCREMENT LOGIC
+      let counter = 1;
+      while (true) {
+        try {
+          await S3.headObject({ Bucket: S3_BUCKET, Key: key }).promise();
+          finalName = `${baseName}(${counter})${ext}`;
+          key = `uploads/${folderSafe}/${finalName}`;
+          counter++;
+        } catch (err) {
+          // headObject failed => file does not exist => stop
+          break;
+        }
       }
-    });
 
-  } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({
-      message: "Failed to upload file",
-      error: err.message
-    });
+      // Upload to S3
+      const params = {
+        Bucket: S3_BUCKET,
+        Key: key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        ACL: "private",
+      };
+
+      await S3.upload(params).promise();
+
+      const signedUrl = makeSignedUrl(key, 3600);
+
+      res.json({
+        message: "File uploaded successfully!",
+        file: {
+          originalName: finalName,
+          key,
+          size: file.size,
+          folder: folderSafe,
+          url: signedUrl,
+        },
+      });
+    } catch (err) {
+      console.error("Upload error:", err);
+      res.status(500).json({
+        message: "Failed to upload file",
+        error: err.message,
+      });
+    }
   }
-});
+);
 
 // ✅ List files: PUBLIC (read-only)
 app.get("/files", async (req, res) => {
@@ -193,13 +190,13 @@ app.get("/files", async (req, res) => {
     }
 
     const rawLimit = parseInt(req.query.limit, 10);
-    const limit = Number.isNaN(rawLimit) ? 50 : Math.min(rawLimit, 100); // hard cap at 100
+    const limit = Number.isNaN(rawLimit) ? 100 : Math.min(rawLimit, 200);
     const continuationToken = req.query.continuationToken || undefined;
-    const folderQuery = req.query.folder ? safeFolderName(req.query.folder) : null;
+    const folderQuery = req.query.folder
+      ? safeFolderName(req.query.folder)
+      : null;
 
-    const prefix = folderQuery
-      ? `uploads/${folderQuery}/`
-      : "uploads/";
+    const prefix = folderQuery ? `uploads/${folderQuery}/` : "uploads/";
 
     const params = {
       Bucket: S3_BUCKET,
@@ -217,8 +214,6 @@ app.get("/files", async (req, res) => {
       .filter((obj) => obj.Key !== "uploads/")
       .map((obj) => {
         const key = obj.Key;
-
-        // Remove "uploads/" prefix
         let relative = key.startsWith("uploads/")
           ? key.slice("uploads/".length)
           : key;
@@ -246,13 +241,16 @@ app.get("/files", async (req, res) => {
 
     res.json({
       files,
-      nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null,
+      nextContinuationToken: data.IsTruncated
+        ? data.NextContinuationToken
+        : null,
     });
   } catch (err) {
     console.error("Error listing files:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to list files", error: err.message });
+    res.status(500).json({
+      message: "Failed to list files",
+      error: err.message,
+    });
   }
 });
 
@@ -272,9 +270,10 @@ app.delete("/files", requireAdmin, async (req, res) => {
     res.json({ message: "File deleted", key });
   } catch (err) {
     console.error("Error deleting file:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to delete file", error: err.message });
+    res.status(500).json({
+      message: "Failed to delete file",
+      error: err.message,
+    });
   }
 });
 
@@ -294,15 +293,16 @@ app.get("/files/download", async (req, res) => {
       Bucket: S3_BUCKET,
       Key: key,
       Expires: 60 * 60,
-      ResponseContentDisposition: "attachment", // force download
+      ResponseContentDisposition: "attachment",
     });
 
     res.json({ url });
   } catch (err) {
     console.error("Download URL error:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to generate download URL", error: err.message });
+    res.status(500).json({
+      message: "Failed to generate download URL",
+      error: err.message,
+    });
   }
 });
 
@@ -318,18 +318,16 @@ app.put("/files/rename", requireAdmin, async (req, res) => {
       return res.status(500).json({ message: "S3 bucket not configured" });
     }
 
-    // key: uploads/<folder>/<name.ext>
     const keyParts = key.split("/");
     if (keyParts.length < 3) {
       return res.status(400).json({ message: "Invalid key format" });
     }
 
-    const folder = keyParts[1]; // uploads/<folder>/...
+    const folder = keyParts[1];
     const ext = path.extname(key);
     const safeNewBase = newName.replace(/\s+/g, "_").toLowerCase();
     const newKey = `uploads/${folder}/${safeNewBase}${ext}`;
 
-    // Copy then delete old
     await copyObjectInBucket(key, newKey);
     await deleteObjectInBucket(key);
 
@@ -346,9 +344,10 @@ app.put("/files/rename", requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error("Rename error:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to rename file", error: err.message });
+    res.status(500).json({
+      message: "Failed to rename file",
+      error: err.message,
+    });
   }
 });
 
@@ -371,7 +370,7 @@ app.put("/files/move", requireAdmin, async (req, res) => {
       return res.status(400).json({ message: "Invalid key format" });
     }
 
-    const filename = keyParts[keyParts.length - 1]; // last part
+    const filename = keyParts[keyParts.length - 1];
     const newKey = `uploads/${folderSafe}/${filename}`;
 
     await copyObjectInBucket(key, newKey);
@@ -390,16 +389,20 @@ app.put("/files/move", requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error("Move error:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to move file", error: err.message });
+    res.status(500).json({
+      message: "Failed to move file",
+      error: err.message,
+    });
   }
 });
 
 // Fallback error handler
 app.use((err, req, res, next) => {
   console.error("GLOBAL ERROR:", err);
-  res.status(500).json({ message: "Server error", error: err.message || err });
+  res.status(500).json({
+    message: "Server error",
+    error: err.message || err,
+  });
 });
 
 app.listen(PORT, () => {
