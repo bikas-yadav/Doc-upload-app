@@ -4,6 +4,7 @@ const cors = require("cors");
 const multer = require("multer");
 const aws = require("aws-sdk");
 const path = require("path");
+const compression = require("compression"); // ✅ NEW
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -30,6 +31,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use(compression()); // ✅ compress all responses
 
 // memory storage
 const upload = multer({
@@ -70,9 +72,14 @@ function makeSignedUrl(key, expiresSeconds = 60 * 60) {
 }
 // ------------------------------
 
-// Health check
+// Root / simple check
 app.get("/", (req, res) => {
   res.send("Study Drive backend (S3) is running ✅");
+});
+
+// ✅ Dedicated health check (for UptimeRobot / Render pings)
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
 });
 
 // Upload endpoint: expects form field name "document"
@@ -154,18 +161,32 @@ app.post("/upload", upload.single("document"), async (req, res) => {
   }
 });
 
-// List files endpoint: returns array of { name, key, size, lastModified, url, folder }
+// ✅ List files endpoint with pagination & optional folder filter:
+// GET /files?limit=50&continuationToken=...&folder=myfolder
 app.get("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
       return res.status(500).json({ message: "S3 bucket not configured" });
     }
 
+    const rawLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isNaN(rawLimit) ? 50 : Math.min(rawLimit, 100); // hard cap at 100
+    const continuationToken = req.query.continuationToken || undefined;
+    const folderQuery = req.query.folder ? safeFolderName(req.query.folder) : null;
+
+    const prefix = folderQuery
+      ? `uploads/${folderQuery}/`
+      : "uploads/";
+
     const params = {
       Bucket: S3_BUCKET,
-      Prefix: "uploads/",
-      MaxKeys: 1000,
+      Prefix: prefix,
+      MaxKeys: limit,
     };
+
+    if (continuationToken) {
+      params.ContinuationToken = continuationToken;
+    }
 
     const data = await S3.listObjectsV2(params).promise();
 
@@ -200,7 +221,10 @@ app.get("/files", async (req, res) => {
         };
       });
 
-    res.json({ files });
+    res.json({
+      files,
+      nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null,
+    });
   } catch (err) {
     console.error("Error listing files:", err);
     res
@@ -231,7 +255,7 @@ app.delete("/files", async (req, res) => {
   }
 });
 
-// NEW: Download endpoint (returns a signed URL optimized for download)
+// Download endpoint (returns a signed URL optimized for download)
 app.get("/files/download", async (req, res) => {
   try {
     const key = req.query.key;
@@ -259,7 +283,7 @@ app.get("/files/download", async (req, res) => {
   }
 });
 
-// NEW: Rename file (within same folder)
+// Rename file (within same folder)
 app.put("/files/rename", async (req, res) => {
   try {
     const { key, newName } = req.body || {};
@@ -305,7 +329,7 @@ app.put("/files/rename", async (req, res) => {
   }
 });
 
-// NEW: Move file to another folder
+// Move file to another folder
 app.put("/files/move", async (req, res) => {
   try {
     const { key, newFolder } = req.body || {};
