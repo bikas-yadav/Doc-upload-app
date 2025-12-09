@@ -5,6 +5,8 @@ const multer = require("multer");
 const aws = require("aws-sdk");
 const path = require("path");
 const compression = require("compression");
+const session = require("express-session"); // NEW
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -23,9 +25,14 @@ aws.config.update({
 const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
 
-// ✅ ADMIN TOKEN (set this in Render environment variables)
-// kept for future use; not required by current public endpoints
+// ✅ ADMIN TOKEN (set this in environment variables)
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
+// SESSION secret (required)
+const SESSION_SECRET =
+  process.env.SESSION_SECRET ||
+  // fallback to a generated secret if not provided (production: set env var)
+  crypto.randomBytes(32).toString("hex");
 
 // ==============================
 
@@ -37,7 +44,24 @@ app.use(
 );
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(compression()); // compress all responses
+
+// --- sessions: used to protect admin UI ---
+app.use(
+  session({
+    name: "study_admin_sid",
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // set secure cookie in prod (requires HTTPS)
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 4, // 4 hours
+    },
+  })
+);
 
 // memory storage for uploads
 const upload = multer({
@@ -70,6 +94,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Middleware to protect the admin UI using session
+function requireLoggedIn(req, res, next) {
+  if (req.session && req.session.isAdmin) return next();
+  // redirect to login page
+  return res.redirect("/admin/login");
+}
+
 // Copy object helper (for rename/move)
 async function copyObjectInBucket(oldKey, newKey) {
   await S3.copyObject({
@@ -95,6 +126,87 @@ function makeSignedUrl(key, expiresSeconds = 60 * 60) {
   });
 }
 // ------------------------------
+
+// Serve public assets (non-admin) from public/
+app.use(express.static(path.join(__dirname, "..", "public")));
+
+// --- Admin UI routes ---
+// Place your admin files in /public/admin/*. (e.g. public/admin/admin.html, admin.css, admin.js)
+
+// Login page (simple form). You can replace this with a custom static page if you want.
+app.get("/admin/login", (req, res) => {
+  // If already logged in, redirect to admin index
+  if (req.session && req.session.isAdmin) return res.redirect("/admin");
+  // Simple login form
+  res.send(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>Admin Login</title>
+        <style>
+          body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6}
+          .card{background:white;padding:24px;border-radius:8px;box-shadow:0 6px 30px rgba(2,6,23,0.08);width:360px}
+          input{width:100%;padding:10px;margin-top:8px;border-radius:6px;border:1px solid #e5e7eb}
+          button{margin-top:12px;padding:10px 12px;width:100%;border-radius:6px;border:none;background:#0ea5a0;color:white;font-weight:600}
+          .note{font-size:13px;color:#6b7280;margin-top:8px}
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h3>Admin login</h3>
+          <form method="POST" action="/admin/login">
+            <input name="token" type="password" placeholder="Admin token / password" required />
+            <button type="submit">Sign in</button>
+          </form>
+          <div class="note">This page protects the admin UI. API endpoints remain as configured on the server.</div>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+// Login handler
+app.post("/admin/login", (req, res) => {
+  const token = req.body.token;
+  if (!ADMIN_TOKEN) {
+    console.error("ADMIN_TOKEN not set in environment!");
+    return res.status(500).send("Server admin not configured");
+  }
+  if (!token || token !== ADMIN_TOKEN) {
+    // simple failure - could add rate limiting in future
+    return res.status(401).send(`
+      <p>Invalid token. <a href="/admin/login">Try again</a></p>
+    `);
+  }
+
+  // success: mark session
+  req.session.isAdmin = true;
+  // redirect to admin index (protected)
+  return res.redirect("/admin");
+});
+
+// Logout
+app.get("/admin/logout", (req, res) => {
+  req.session.destroy((err) => {
+    res.clearCookie("study_admin_sid");
+    return res.redirect("/admin/login");
+  });
+});
+
+// Serve admin static assets behind login
+// All files under public/admin will be served here, but only if logged in.
+app.use(
+  "/admin",
+  // protect all /admin/* routes
+  (req, res, next) => {
+    // allow the login routes above to pass through
+    if (req.path === "/login" || req.path === "/logout") return next();
+    return requireLoggedIn(req, res, next);
+  },
+  express.static(path.join(__dirname, "..", "public", "admin"))
+);
 
 // Root / simple check
 app.get("/", (req, res) => {
@@ -408,4 +520,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Study Drive backend running on port ${PORT}`);
+  console.log(`🔒 Admin UI protected at /admin (login at /admin/login)`);
 });
