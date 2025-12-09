@@ -1,0 +1,112 @@
+<!-- admin.html -->
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Study Drive — Admin</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">Study Drive — Admin</div>
+      <div class="controls">
+        <input id="folderFilter" placeholder="Filter / folder (e.g. notes)" />
+        <input id="searchInput" placeholder="Search files" />
+        <button id="refreshBtn">Refresh</button>
+        <button id="themeToggle" title="Toggle theme">🌙</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="left">
+        <div class="panel">
+          <h3>Upload Document</h3>
+          <form id="uploadForm">
+            <input type="text" id="uploadFolder" placeholder="Folder name (optional)" />
+            <input type="file" id="uploadFile" name="document" required />
+            <div class="row">
+              <button type="submit">Upload</button>
+              <button type="button" id="clearUpload">Clear</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel small">
+          <h3>Quick Actions</h3>
+          <div class="row">
+            <input id="adminToken" placeholder="Enter Admin Token" />
+            <button id="applyToken">Set Token</button>
+            <button id="clearToken">Clear</button>
+          </div>
+          <div class="row">
+            <button id="downloadSelected">Download Selected</button>
+            <button id="deleteSelected">Delete Selected</button>
+          </div>
+        </div>
+
+        <div class="panel small">
+          <h3>Pagination</h3>
+          <div class="row">
+            <button id="prevPage" disabled>Prev</button>
+            <button id="nextPage" disabled>Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="right">
+        <div class="panel">
+          <h3>Files</h3>
+          <div class="meta">Showing <span id="fileCount">0</span> files — Folder: <strong
+              id="currentFolder">root</strong></div>
+          <table id="filesTable">
+            <thead>
+              <tr>
+                <th><input id="selectAll" type="checkbox" /></th>
+                <th>Preview</th>
+                <th>Name</th>
+                <th>Folder</th>
+                <th>Size</th>
+                <th>Modified</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Viewer modal -->
+    <div id="viewerModal" class="modal hidden">
+      <div class="modal-inner">
+        <div class="modal-header">
+          <div id="viewerTitle">Preview</div>
+          <button id="closeViewer">Close</button>
+        </div>
+        <div id="viewerBody" class="viewer-body"></div>
+      </div>
+    </div>
+
+    <template id="fileRow">
+      <tr>
+        <td><input class="rowCheck" type="checkbox" /></td>
+        <td class="previewCell"></td>
+        <td class="nameCell"></td>
+        <td class="folderCell"></td>
+        <td class="sizeCell"></td>
+        <td class="modCell"></td>
+        <td class="actionsCell"></td>
+      </tr>
+    </template>
+
+    <script src="admin.js"></script>
+  </div>
+</body>
+
+</html>
