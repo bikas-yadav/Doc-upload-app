@@ -12,7 +12,6 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // ======= BUCKET CONFIG =======
-// You can keep this hard-coded or move to env if you want.
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || "my-doc-upload-app-bucket";
 const BUCKET_REGION = process.env.S3_BUCKET_REGION || "ap-south-2";
 
@@ -25,28 +24,28 @@ aws.config.update({
 const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
 
-// ✅ ADMIN TOKEN (set this in Render environment variables)
-// used for login form validation
+// ADMIN TOKEN and SESSION SECRET (set in env)
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
-
-// SESSION secret (required for signing cookies)
 const SESSION_SECRET =
   process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
 // ==============================
 
+// CORS: keep permissive for API but allow credentials if needed.
+// Note: admin UI uses same-origin fetch with credentials:'same-origin' so CORS here is not critical.
 app.use(
   cors({
-    origin: "*",
+    origin: true,
     methods: ["GET", "POST", "DELETE", "PUT"],
+    credentials: true,
   })
 );
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(compression()); // compress all responses
+app.use(compression());
 
-// --- sessions: used to protect admin UI ---
+// sessions
 app.use(
   session({
     name: "study_admin_sid",
@@ -65,7 +64,7 @@ app.use(
 // memory storage for uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (adjust if needed)
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
 
 // ---------- HELPERS ----------
@@ -75,31 +74,6 @@ function safeFolderName(folderRaw) {
   return trimmed.replace(/[^\w\-]/g, "_").toLowerCase();
 }
 
-// Simple admin auth middleware for API (optional re-use)
-function requireAdminHeader(req, res, next) {
-  const token =
-    req.headers["x-admin-token"] ||
-    (req.headers["authorization"] || "").replace("Bearer ", "");
-
-  if (!ADMIN_TOKEN) {
-    console.error("ADMIN_TOKEN not set in environment!");
-    return res.status(500).json({ message: "Server admin not configured" });
-  }
-
-  if (!token || token !== ADMIN_TOKEN) {
-    return res.status(403).json({ message: "Forbidden: admin only" });
-  }
-
-  next();
-}
-
-// Middleware to protect the admin UI using session
-function requireLoggedIn(req, res, next) {
-  if (req.session && req.session.isAdmin) return next();
-  return res.redirect("/admin/login");
-}
-
-// Copy object helper (for rename/move)
 async function copyObjectInBucket(oldKey, newKey) {
   await S3.copyObject({
     Bucket: S3_BUCKET,
@@ -125,84 +99,38 @@ function makeSignedUrl(key, expiresSeconds = 60 * 60) {
 }
 // ------------------------------
 
-// Serve generic public folder (if you have one)
+// Serve generic public folder (if any)
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-// --- Admin UI routes ---
-// Place your admin files in frontend/ (sibling of backend/)
-// Example: frontend/admin.html or frontend/index.html
-// We'll mount that folder at /admin and protect it with the session middleware.
+// Serve admin static files from frontend/ at /admin
+// NOTE: admin.html contains the login UI — no server-side HTML login page needed.
+app.use("/admin", express.static(path.join(__dirname, "..", "frontend")));
 
-// Login page (simple form)
-app.get("/admin/login", (req, res) => {
-  // If already logged in, redirect to admin index
-  if (req.session && req.session.isAdmin) return res.redirect("/admin");
-  // Simple login form (you can replace with your static file later)
-  res.send(`
-    <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width,initial-scale=1"/>
-        <title>Admin Login</title>
-        <style>
-          body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6}
-          .card{background:white;padding:24px;border-radius:8px;box-shadow:0 6px 30px rgba(2,6,23,0.08);width:360px}
-          input{width:100%;padding:10px;margin-top:8px;border-radius:6px;border:1px solid #e5e7eb}
-          button{margin-top:12px;padding:10px 12px;width:100%;border-radius:6px;border:none;background:#0ea5a0;color:white;font-weight:600}
-          .note{font-size:13px;color:#6b7280;margin-top:8px}
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h3>Admin login</h3>
-          <form method="POST" action="/admin/login">
-            <input name="token" type="password" placeholder="Admin token / password" required />
-            <button type="submit">Sign in</button>
-          </form>
-          <div class="note">This page protects the admin UI. API endpoints remain as configured on the server.</div>
-        </div>
-      </body>
-    </html>
-  `);
-});
-
-// Login handler
-app.post("/admin/login", (req, res) => {
-  const token = req.body.token;
+// Authentication endpoint used by admin.js (returns JSON)
+// Expects: { token: "..." } (JSON)
+// On success sets req.session.isAdmin = true
+app.post("/admin/auth", (req, res) => {
+  const { token } = req.body || {};
   if (!ADMIN_TOKEN) {
     console.error("ADMIN_TOKEN not set in environment!");
-    return res.status(500).send("Server admin not configured");
+    return res.status(500).json({ ok: false, message: "Server admin not configured" });
   }
   if (!token || token !== ADMIN_TOKEN) {
-    return res.status(401).send(`
-      <p>Invalid token. <a href="/admin/login">Try again</a></p>
-    `);
+    return res.status(401).json({ ok: false, message: "Invalid token" });
   }
 
-  // success: mark session
+  // success
   req.session.isAdmin = true;
-  return res.redirect("/admin");
+  return res.json({ ok: true, message: "Authenticated" });
 });
 
-// Logout
+// Logout (clears session)
 app.get("/admin/logout", (req, res) => {
   req.session.destroy((err) => {
     res.clearCookie("study_admin_sid");
-    return res.redirect("/admin/login");
+    return res.json({ ok: true });
   });
 });
-
-// Mount admin static files from ../frontend at the /admin route, but protect them first
-app.use(
-  "/admin",
-  (req, res, next) => {
-    // allow the login/logout routes to pass without session checks
-    if (req.path === "/login" || req.path === "/logout") return next();
-    return requireLoggedIn(req, res, next);
-  },
-  express.static(path.join(__dirname, "..", "frontend"))
-);
 
 // Root / simple check
 app.get("/", (req, res) => {
@@ -214,11 +142,11 @@ app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
-// ---------------------------------------------------------------------
-// Your existing API endpoints (kept public as in your original code)
-// If you want to protect them as well, add `requireLoggedIn` or `requireAdminHeader`
-// as middleware to each route below (I'll keep them public for now).
-// ---------------------------------------------------------------------
+// -----------------
+// API endpoints (upload/list/download/rename/move/delete)
+// These are left public as in your original implementation.
+// If you'd like, we can require session for these by checking req.session.isAdmin
+// -----------------
 
 // Upload endpoint
 app.post(
@@ -509,5 +437,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Study Drive backend running on port ${PORT}`);
-  console.log(`🔒 Admin UI protected at /admin (login at /admin/login)`);
+  console.log(`🔒 Admin UI available at /admin (frontend/admin.html handles login)`); 
 });
