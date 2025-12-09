@@ -86,16 +86,75 @@
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
     <!-- Viewer modal -->
-    <div id="viewerModal" class="modal hidden" aria-hidden="true">
-      <div class="modal-inner" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
+    <div id="viewerModal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="viewerTitle" tabindex="-1">
+      <div class="modal-inner" role="document">
         <div class="modal-header">
           <div id="viewerTitle">Preview</div>
-          <button id="closeViewer" type="button">Close</button>
+          <button id="closeViewer" type="button" aria-label="Close preview">Close</button>
         </div>
-        <div id="viewerBody" class="viewer-body"></div>
+        <div id="viewerBody" class="viewer-body" aria-live="polite"></div>
       </div>
     </div>
   </div>
+
+  <script>
+    // Modal helpers — safe, minimal, and robust
+    (function () {
+      const viewerModal = document.getElementById("viewerModal");
+      const closeViewer = document.getElementById("closeViewer");
+      const viewerBody = document.getElementById("viewerBody");
+
+      function closeModal() {
+        if (!viewerModal) return;
+        // hide modal
+        viewerModal.classList.add("hidden");
+        viewerModal.setAttribute("aria-hidden", "true");
+        // clear body to stop any media playback (iframe/img)
+        if (viewerBody) {
+          // If iframe exists, remove it to stop playback
+          viewerBody.innerHTML = "";
+        }
+        // return focus for accessibility
+        const refreshBtn = document.getElementById("refreshBtn");
+        if (refreshBtn) refreshBtn.focus();
+      }
+
+      function openModalWithContent(html) {
+        if (!viewerModal || !viewerBody) return;
+        viewerBody.innerHTML = html;
+        viewerModal.classList.remove("hidden");
+        viewerModal.removeAttribute("aria-hidden");
+        // focus the close button for keyboard users
+        closeViewer && closeViewer.focus();
+      }
+
+      // Attach listeners
+      if (closeViewer) {
+        closeViewer.addEventListener("click", (e) => {
+          e.stopPropagation();
+          closeModal();
+        });
+      }
+
+      // Close when clicking the overlay (but not when clicking inside modal-inner)
+      if (viewerModal) {
+        viewerModal.addEventListener("click", (e) => {
+          if (e.target === viewerModal) closeModal();
+        });
+      }
+
+      // Close on Escape key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeModal();
+      });
+
+      // Expose small API for the admin script (so the same admin.js can call it)
+      window.adminViewer = {
+        open: openModalWithContent,
+        close: closeModal,
+      };
+    })();
+  </script>
 
   <script src="admin.js"></script>
 </body>

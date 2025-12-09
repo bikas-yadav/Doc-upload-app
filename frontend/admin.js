@@ -91,7 +91,7 @@
   async function doLogin(token){
     try{
       const trimmed = (token || '').trim();
-      const res = await fetch(API_BASE + '/admin/auth', {
+      const res = await fetch(API_BASE + '{BACKEND_URL}/admin/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: trimmed }),
