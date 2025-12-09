@@ -61,6 +61,17 @@
     return { 'Accept':'application/json' };
   }
 
+  // helper: if server returns HTML (login redirect) or non-json, send user to login page
+  function ensureJsonOrRedirect(res){
+    const ct = res.headers.get('content-type') || '';
+    if(!res.ok || !ct.includes('application/json')){
+      // likely redirected to login page (or unauthorized)
+      window.location.href = '/admin/login';
+      return false;
+    }
+    return true;
+  }
+
   async function listFiles(continuation=null){
     const folder = (folderFilter.value || '').trim();
     const q = new URLSearchParams();
@@ -68,17 +79,22 @@
     if(folder) q.set('folder', folder);
     if(continuation) q.set('continuationToken', continuation);
 
-    const res = await fetch(API_BASE + '/files?' + q.toString(), { headers: buildHeaders() });
-    if(!res.ok){ showToast('Failed to fetch files'); return; }
-    const data = await res.json();
-    currentFiles = data.files || [];
-    nextContinuation = data.nextContinuationToken || null;
-    renderFiles();
+    try{
+      const res = await fetch(API_BASE + '/files?' + q.toString(), { headers: buildHeaders(), credentials: 'same-origin' });
+      if(!ensureJsonOrRedirect(res)) return;
+      const data = await res.json();
+      currentFiles = data.files || [];
+      nextContinuation = data.nextContinuationToken || null;
+      renderFiles();
 
-    // pagination state
-    prevBtn.disabled = continuationStack.length === 0;
-    nextBtn.disabled = !nextContinuation;
-    currentFolderEl.textContent = folder || 'root';
+      // pagination state
+      prevBtn.disabled = continuationStack.length === 0;
+      nextBtn.disabled = !nextContinuation;
+      currentFolderEl.textContent = folder || 'root';
+    }catch(err){
+      console.error('Network error listing files', err);
+      showToast('Network error. Are you logged in?');
+    }
   }
 
   function renderFiles(){
@@ -145,46 +161,71 @@
     form.append('document', f);
     if(uploadFolder.value) form.append('folder', uploadFolder.value);
 
-    const res = await fetch(API_BASE + '/upload', { method:'POST', body:form });
-    const data = await res.json();
-    if(!res.ok){ showToast('Upload failed: ' + (data.message || res.statusText)); return; }
-    showToast('Uploaded: ' + data.file.originalName);
-    uploadForm.reset();
-    await listFiles();
+    try{
+      const res = await fetch(API_BASE + '/upload', { method:'POST', body:form, credentials: 'same-origin' });
+      if(!ensureJsonOrRedirect(res)) return;
+      const data = await res.json();
+      if(!res.ok){ showToast('Upload failed: ' + (data.message || res.statusText)); return; }
+      showToast('Uploaded: ' + data.file.originalName);
+      uploadForm.reset();
+      await listFiles();
+    }catch(err){
+      console.error('Upload error', err);
+      showToast('Upload failed (network)');
+    }
   }
 
   async function deleteFile(key){
     if(!confirm('Delete this file?')) return;
-    const res = await fetch(API_BASE + '/files', { method:'DELETE', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key }) });
-    const data = await res.json();
-    if(!res.ok){ showToast('Delete failed'); return; }
-    showToast('Deleted');
-    await listFiles();
+    try{
+      const res = await fetch(API_BASE + '/files', { method:'DELETE', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key }), credentials: 'same-origin' });
+      if(!ensureJsonOrRedirect(res)) return;
+      const data = await res.json();
+      if(!res.ok){ showToast('Delete failed'); return; }
+      showToast('Deleted');
+      await listFiles();
+    }catch(err){
+      console.error('Delete error', err);
+      showToast('Delete failed (network)');
+    }
   }
 
   async function downloadFile(key){
     // open redirect endpoint
+    // no JSON expected here; the server will redirect to signed URL
     window.open(API_BASE + '/files/download?key=' + encodeURIComponent(key), '_blank');
   }
 
   async function renameFlow(file){
     const newName = prompt('Enter new base name (without extension)', file.name.replace(/\.[^.]+$/,''));
     if(!newName) return;
-    const res = await fetch(API_BASE + '/files/rename', { method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: file.key, newName }) });
-    const data = await res.json();
-    if(!res.ok){ showToast('Rename failed: ' + (data.message || '')); return; }
-    showToast('Renamed');
-    await listFiles();
+    try{
+      const res = await fetch(API_BASE + '/files/rename', { method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: file.key, newName }), credentials: 'same-origin' });
+      if(!ensureJsonOrRedirect(res)) return;
+      const data = await res.json();
+      if(!res.ok){ showToast('Rename failed: ' + (data.message || '')); return; }
+      showToast('Renamed');
+      await listFiles();
+    }catch(err){
+      console.error('Rename error', err);
+      showToast('Rename failed (network)');
+    }
   }
 
   async function moveFlow(file){
     const newFolder = prompt('Move to folder (name)', file.folder || 'root');
     if(newFolder===null) return;
-    const res = await fetch(API_BASE + '/files/move', { method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: file.key, newFolder }) });
-    const data = await res.json();
-    if(!res.ok){ showToast('Move failed'); return; }
-    showToast('Moved');
-    await listFiles();
+    try{
+      const res = await fetch(API_BASE + '/files/move', { method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: file.key, newFolder }), credentials: 'same-origin' });
+      if(!ensureJsonOrRedirect(res)) return;
+      const data = await res.json();
+      if(!res.ok){ showToast('Move failed'); return; }
+      showToast('Moved');
+      await listFiles();
+    }catch(err){
+      console.error('Move error', err);
+      showToast('Move failed (network)');
+    }
   }
 
   // bulk actions
@@ -196,11 +237,17 @@
     const keys = await getSelectedKeys();
     if(!keys.length) return showToast('No files selected');
     if(!confirm(`Delete ${keys.length} file(s)?`)) return;
-    for(const k of keys){
-      await fetch(API_BASE + '/files', { method:'DELETE', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: k }) });
+    try{
+      for(const k of keys){
+        const res = await fetch(API_BASE + '/files', { method:'DELETE', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: k }), credentials: 'same-origin' });
+        if(!ensureJsonOrRedirect(res)) return;
+      }
+      showToast('Deleted selected');
+      await listFiles();
+    }catch(err){
+      console.error('Bulk delete error', err);
+      showToast('Bulk delete failed (network)');
     }
-    showToast('Deleted selected');
-    await listFiles();
   }
 
   async function downloadSelected(){
