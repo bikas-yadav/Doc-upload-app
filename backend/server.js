@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 4000;
 
 // ======= BUCKET CONFIG =======
 // You can keep this hard-coded or move to env if you want.
-const BUCKET_NAME = "my-doc-upload-app-bucket";
-const BUCKET_REGION = "ap-south-2";
+const BUCKET_NAME = process.env.S3_BUCKET_NAME || "my-doc-upload-app-bucket";
+const BUCKET_REGION = process.env.S3_BUCKET_REGION || "ap-south-2";
 
 aws.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -24,6 +24,7 @@ const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
 
 // ✅ ADMIN TOKEN (set this in Render environment variables)
+// kept for future use; not required by current public endpoints
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
 // ==============================
@@ -41,7 +42,7 @@ app.use(compression()); // compress all responses
 // memory storage for uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (adjust if needed)
 });
 
 // ---------- HELPERS ----------
@@ -51,7 +52,7 @@ function safeFolderName(folderRaw) {
   return trimmed.replace(/[^\w\-]/g, "_").toLowerCase();
 }
 
-// Simple admin auth middleware
+// Simple admin auth middleware (kept for optional use)
 function requireAdmin(req, res, next) {
   const token =
     req.headers["x-admin-token"] ||
@@ -105,11 +106,10 @@ app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
-// 🔒 Upload endpoint: only admin can upload
+// 🔓 Upload endpoint: PUBLIC (no admin required) to match your frontend behavior
 // expects form field name "document"
 app.post(
   "/upload",
-  requireAdmin,
   upload.single("document"),
   async (req, res) => {
     try {
@@ -254,8 +254,8 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 🔒 Delete file: only admin
-app.delete("/files", requireAdmin, async (req, res) => {
+// 🔓 Delete file: PUBLIC (no admin required) to match your frontend
+app.delete("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
       return res.status(500).json({ message: "S3 bucket not configured" });
@@ -277,7 +277,7 @@ app.delete("/files", requireAdmin, async (req, res) => {
   }
 });
 
-// ✅ Download endpoint: PUBLIC (read-only)
+// ✅ Download endpoint: redirect to signed URL so browser can download/open directly
 app.get("/files/download", async (req, res) => {
   try {
     const key = req.query.key;
@@ -296,7 +296,8 @@ app.get("/files/download", async (req, res) => {
       ResponseContentDisposition: "attachment",
     });
 
-    res.json({ url });
+    // Redirect the browser to the signed URL (so window.location.href works)
+    return res.redirect(url);
   } catch (err) {
     console.error("Download URL error:", err);
     res.status(500).json({
@@ -306,8 +307,8 @@ app.get("/files/download", async (req, res) => {
   }
 });
 
-// 🔒 Rename file (within same folder): only admin
-app.put("/files/rename", requireAdmin, async (req, res) => {
+// 🔓 Rename file (within same folder): PUBLIC (no admin required) to match frontend
+app.put("/files/rename", async (req, res) => {
   try {
     const { key, newName } = req.body || {};
     if (!key || !newName) {
@@ -351,8 +352,8 @@ app.put("/files/rename", requireAdmin, async (req, res) => {
   }
 });
 
-// 🔒 Move file to another folder: only admin
-app.put("/files/move", requireAdmin, async (req, res) => {
+// 🔓 Move file to another folder: PUBLIC (no admin required) to match frontend
+app.put("/files/move", async (req, res) => {
   try {
     const { key, newFolder } = req.body || {};
     if (!key || !newFolder) {
