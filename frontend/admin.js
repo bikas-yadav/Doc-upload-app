@@ -1,415 +1,485 @@
-// frontend/admin.js
-(function(){
-  // set your backend URL here (used when window.API_BASE not provided)
-  const BACKEND_URL = "https://doc-upload-app.onrender.com";
-  // allow overriding from the page environment if needed
-  const API_BASE = window.API_BASE || BACKEND_URL;
+// admin.js - updated (use with the updated admin.html & admin.css)
+// Set your backend URL here:
+const BACKEND_URL = "https://doc-upload-app.onrender.com";
 
-  // login elements
-  const loginPage = document.getElementById('loginPage');
-  const loginForm = document.getElementById('loginForm');
-  const loginToken = document.getElementById('loginToken');
-  const loginMsg = document.getElementById('loginMsg');
+// ---------- DOM ----------
+const loginPage = document.getElementById("loginPage");
+const loginForm = document.getElementById("loginForm");
+const loginToken = document.getElementById("loginToken");
+const loginMsg = document.getElementById("loginMsg");
 
-  // admin app elements
-  const appRoot = document.getElementById('app');
-  const uploadForm = document.getElementById('uploadForm');
-  const uploadFile = document.getElementById('uploadFile');
-  const uploadFolder = document.getElementById('uploadFolder');
-  const filesTableBody = document.querySelector('#filesTable tbody');
-  const fileCountEl = document.getElementById('fileCount');
-  const folderFilter = document.getElementById('folderFilter');
-  const searchInput = document.getElementById('searchInput');
-  const toast = document.getElementById('toast');
-  const refreshBtn = document.getElementById('refreshBtn');
-  const prevBtn = document.getElementById('prevPage');
-  const nextBtn = document.getElementById('nextPage');
-  const currentFolderEl = document.getElementById('currentFolder');
-  const selectAll = document.getElementById('selectAll');
-  const themeToggle = document.getElementById('themeToggle');
-  const logoutBtn = document.getElementById('logoutBtn');
+const appRoot = document.getElementById("app");
+const refreshBtn = document.getElementById("refreshBtn");
+const logoutBtn = document.getElementById("logoutBtn");
 
-  const viewerModal = document.getElementById('viewerModal');
-  const viewerBody = document.getElementById('viewerBody');
-  const viewerTitle = document.getElementById('viewerTitle');
-  const closeViewer = document.getElementById('closeViewer');
+const uploadForm = document.getElementById("uploadForm");
+const uploadFile = document.getElementById("uploadFile");
+const uploadFolder = document.getElementById("uploadFolder");
+const clearUploadBtn = document.getElementById("clearUpload");
 
-  let continuationStack = [];
-  let nextContinuation = null;
-  let currentFiles = [];
+const deleteSelectedBtn = document.getElementById("deleteSelected");
+const downloadSelectedBtn = document.getElementById("downloadSelected");
 
-  function showToast(msg, ms=3000){
-    if(!toast) return;
-    toast.textContent = msg;
-    toast.classList.remove('hidden');
-    setTimeout(()=>toast.classList.add('hidden'), ms);
+const prevPageBtn = document.getElementById("prevPage");
+const nextPageBtn = document.getElementById("nextPage");
+
+const filesTableBody = document.querySelector("#filesTable tbody");
+const fileCountSpan = document.getElementById("fileCount");
+const currentFolderLabel = document.getElementById("currentFolder");
+const selectAllCheckbox = document.getElementById("selectAll");
+
+const folderFilter = document.getElementById("folderFilter");
+const searchInput = document.getElementById("searchInput");
+
+// toast
+const toastEl = document.getElementById("toast");
+
+// ---------- State ----------
+let files = [];
+let nextContinuationToken = null;
+let prevTokens = []; // stack of previous continuation tokens for Prev button
+let currentPrefix = "uploads/"; // not heavily used, but can be updated via folderFilter
+let currentFolder = "root";
+
+// ---------- Helpers ----------
+function showToast(message, ms = 2500) {
+  if (!toastEl) {
+    alert(message);
+    return;
   }
+  toastEl.textContent = message;
+  toastEl.classList.remove("hidden");
+  setTimeout(() => toastEl.classList.add("hidden"), ms);
+}
 
-  // theme
-  function applyTheme(theme){
-    if(theme === 'light') { document.body.classList.add('light'); themeToggle.textContent='☀️'; }
-    else { document.body.classList.remove('light'); themeToggle.textContent='🌙'; }
-    localStorage.setItem('study_theme', theme);
-  }
-  if (themeToggle) {
-    themeToggle.addEventListener('click', ()=>{
-      const next = document.body.classList.contains('light') ? 'dark' : 'light';
-      applyTheme(next);
+function formatSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(2)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(2)} GB`;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString();
+}
+
+function detectType(name) {
+  const lower = (name || "").toLowerCase();
+  if (lower.endsWith(".pdf")) return "pdf";
+  if (lower.match(/\.(png|jpe?g|gif|webp|svg)$/)) return "image";
+  if (lower.match(/\.(docx?|pptx?|xlsx?|ppt)$/)) return "doc";
+  return "other";
+}
+
+function makeDownloadUrlForKey(key) {
+  return `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`;
+}
+
+// ---------- Auth ----------
+async function checkSession() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/admin/session`, {
+      method: "GET",
+      credentials: "include",
     });
-  }
-  applyTheme(localStorage.getItem('study_theme') || 'dark');
-
-  function humanSize(bytes){
-    if(!bytes && bytes !== 0) return '';
-    if(bytes < 1024) return bytes + ' B';
-    const units=['KB','MB','GB','TB'];
-    let i= -1; let v = bytes;
-    do{ v = v/1024; i++; } while(v>=1024 && i<units.length-1);
-    return v.toFixed((i<1)?0:1) + ' ' + units[i];
-  }
-  function isoShort(d){
-    try{ return new Date(d).toLocaleString(); }catch(e){ return d; }
-  }
-  function buildHeaders(){ return { 'Accept':'application/json' }; }
-
-  function ensureJsonOrShowLogin(res){
-    const ct = res.headers.get('content-type') || '';
-    if(!res.ok || !ct.includes('application/json')){
-      // server returned non-json (likely 401 or HTML) -> show login
-      showLogin();
-      return false;
-    }
-    return true;
-  }
-
-  // helper to build backend download URL for a file key
-  function makeDownloadUrl(key){
-    return `${API_BASE}/files/download?key=${encodeURIComponent(key)}`;
-  }
-
-  // login flow
-  async function doLogin(token){
-    try{
-      const trimmed = (token || '').trim();
-      const res = await fetch(API_BASE + '{BACKEND_URL}/admin/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: trimmed }),
-        // must include credentials so session cookie set by backend is accepted
-        credentials: 'include'
-      });
-      // try to parse JSON (server returns JSON on success/failure)
-      const data = await res.json().catch(()=>null);
-      if(!res.ok){
-        const msg = data && data.message ? data.message : 'Invalid token';
-        loginMsg.textContent = msg;
-        return false;
-      }
-      if(data && data.ok){
-        hideLogin();
-        showToast('Logged in');
-        await listFiles();
-        return true;
-      } else {
-        loginMsg.textContent = (data && data.message) ? data.message : 'Invalid token';
-        return false;
-      }
-    }catch(err){
-      console.error('Login error', err);
-      loginMsg.textContent = 'Network error';
-      return false;
-    }
-  }
-
-  function showLogin(){
-    if (appRoot) appRoot.classList.add('hidden'), appRoot.setAttribute('aria-hidden','true');
-    if (loginPage) loginPage.classList.remove('hidden');
-  }
-  function hideLogin(){
-    if (loginPage) loginPage.classList.add('hidden');
-    if (appRoot) appRoot.classList.remove('hidden'), appRoot.setAttribute('aria-hidden','false');
-    if (loginToken) loginToken.value = '';
-    if (loginMsg) loginMsg.textContent = '';
-  }
-
-  if (loginForm) {
-    loginForm.addEventListener('submit', async (e)=>{
-      e.preventDefault();
-      if(!loginMsg) return;
-      loginMsg.textContent = '';
-      const token = loginToken ? loginToken.value.trim() : '';
-      if(!token) { loginMsg.textContent = 'Enter admin token'; return; }
-      await doLogin(token);
-    });
-  }
-
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', async ()=>{
-      try{
-        await fetch(API_BASE + '/admin/logout', { method: 'GET', credentials: 'include' });
-      }catch(e){}
-      showLogin();
-    });
-  }
-
-  // API calls
-  async function listFiles(continuation=null){
-    const folder = (folderFilter && folderFilter.value || '').trim();
-    const q = new URLSearchParams();
-    q.set('limit', 200);
-    if(folder) q.set('folder', folder);
-    if(continuation) q.set('continuationToken', continuation);
-
-    try{
-      const res = await fetch(API_BASE + '/files?' + q.toString(), { headers: buildHeaders(), credentials: 'include' });
-      if(!ensureJsonOrShowLogin(res)) return;
-      const data = await res.json();
-      currentFiles = data.files || [];
-      nextContinuation = data.nextContinuationToken || null;
-      renderFiles();
-      if (prevBtn) prevBtn.disabled = continuationStack.length === 0;
-      if (nextBtn) nextBtn.disabled = !nextContinuation;
-      if (currentFolderEl) currentFolderEl.textContent = folder || 'root';
-    }catch(err){
-      console.error('Network error listing files', err);
-      showToast('Network error. Are you logged in?');
-      showLogin();
-    }
-  }
-
-  function renderFilesFromList(list){
-    currentFiles = list.slice();
-    renderFiles();
-  }
-
-  function renderFiles(){
-    if(!filesTableBody) return;
-    filesTableBody.innerHTML = '';
-    if(fileCountEl) fileCountEl.textContent = currentFiles.length;
-
-    currentFiles.forEach(file => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input class="rowCheck" type="checkbox" data-key="${escapeHtml(file.key)}"/></td>
-        <td class="previewCell">${previewHTML(file)}</td>
-        <td class="nameCell">${escapeHtml(file.name)}</td>
-        <td class="folderCell">${escapeHtml(file.folder)}</td>
-        <td class="sizeCell">${humanSize(file.size)}</td>
-        <td class="modCell">${isoShort(file.lastModified)}</td>
-        <td class="actionsCell"></td>
-      `;
-
-      const actions = tr.querySelector('.actionsCell');
-
-      const previewBtn = document.createElement('button'); previewBtn.textContent='Preview';
-      previewBtn.onclick = ()=>openPreview(file);
-      actions.appendChild(previewBtn);
-
-      const downloadBtn = document.createElement('button'); downloadBtn.textContent='Download';
-      downloadBtn.onclick = ()=>downloadFile(file.key);
-      actions.appendChild(downloadBtn);
-
-      const renameBtn = document.createElement('button'); renameBtn.textContent='Rename';
-      renameBtn.onclick = ()=>renameFlow(file);
-      actions.appendChild(renameBtn);
-
-      const moveBtn = document.createElement('button'); moveBtn.textContent='Move';
-      moveBtn.onclick = ()=>moveFlow(file);
-      actions.appendChild(moveBtn);
-
-      const delBtn = document.createElement('button'); delBtn.textContent='Delete';
-      delBtn.onclick = ()=>deleteFile(file.key);
-      actions.appendChild(delBtn);
-
-      filesTableBody.appendChild(tr);
-    });
-  }
-
-  function previewHTML(file){
-    const name = (file.name || '').toLowerCase();
-    // prefer file.url if provided, otherwise use backend redirect link
-    const url = file.url || makeDownloadUrl(file.key);
-    if(name.match(/\.(png|jpe?g|gif|webp)$/)){
-      return `<img src="${url}" alt="preview" style="max-width:72px;max-height:48px;object-fit:cover;border-radius:4px" />`;
-    }
-    if(name.match(/\.(pdf)$/)){
-      return `<div style="font-size:12px;padding:6px;border-radius:6px;background:rgba(0,0,0,0.04);min-width:48px;text-align:center">PDF</div>`;
-    }
-    return `<div style="font-size:12px;padding:6px;border-radius:6px;background:rgba(0,0,0,0.04)">${escapeHtml((file.name||'').split('.').pop() || '')}</div>`;
-  }
-
-  function escapeHtml(s){ return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-  async function uploadHandler(e){
-    e.preventDefault();
-    if(!uploadFile || !uploadFile.files.length) return showToast('Select a file first');
-    const f = uploadFile.files[0];
-    const form = new FormData();
-    form.append('document', f);
-    if(uploadFolder && uploadFolder.value) form.append('folder', uploadFolder.value);
-
-    try{
-      const res = await fetch(API_BASE + '/upload', { method:'POST', body:form, credentials: 'include' });
-      if(!ensureJsonOrShowLogin(res)) return;
-      const data = await res.json();
-      if(!res.ok){ showToast('Upload failed: ' + (data.message || res.statusText)); return; }
-      showToast('Uploaded: ' + (data.file && data.file.originalName ? data.file.originalName : f.name));
-      if(uploadForm) uploadForm.reset();
-      await listFiles();
-    }catch(err){
-      console.error('Upload error', err);
-      showToast('Upload failed (network)');
-    }
-  }
-
-  async function deleteFile(key){
-    if(!confirm('Delete this file?')) return;
-    try{
-      const res = await fetch(API_BASE + '/files', { method:'DELETE', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key }), credentials: 'include' });
-      if(!ensureJsonOrShowLogin(res)) return;
-      const data = await res.json();
-      if(!res.ok){ showToast('Delete failed'); return; }
-      showToast('Deleted');
-      await listFiles();
-    }catch(err){
-      console.error('Delete error', err);
-      showToast('Delete failed (network)');
-    }
-  }
-
-  function downloadFile(key){
-    // open backend redirect URL (will redirect to signed S3 URL)
-    window.open(makeDownloadUrl(key), '_blank');
-  }
-
-  async function renameFlow(file){
-    const newName = prompt('Enter new base name (without extension)', (file.name || '').replace(/\.[^.]+$/,''));
-    if(!newName) return;
-    try{
-      const res = await fetch(API_BASE + '/files/rename', { method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: file.key, newName }), credentials: 'include' });
-      if(!ensureJsonOrShowLogin(res)) return;
-      const data = await res.json();
-      if(!res.ok){ showToast('Rename failed: ' + (data.message || '')); return; }
-      showToast('Renamed');
-      await listFiles();
-    }catch(err){
-      console.error('Rename error', err);
-      showToast('Rename failed (network)');
-    }
-  }
-
-  async function moveFlow(file){
-    const newFolder = prompt('Move to folder (name)', file.folder || 'root');
-    if(newFolder===null) return;
-    try{
-      const res = await fetch(API_BASE + '/files/move', { method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: file.key, newFolder }), credentials: 'include' });
-      if(!ensureJsonOrShowLogin(res)) return;
-      const data = await res.json();
-      if(!res.ok){ showToast('Move failed'); return; }
-      showToast('Moved');
-      await listFiles();
-    }catch(err){
-      console.error('Move error', err);
-      showToast('Move failed (network)');
-    }
-  }
-
-  async function getSelectedKeys(){
-    return Array.from(document.querySelectorAll('.rowCheck:checked')).map(i=>i.dataset.key);
-  }
-
-  async function deleteSelected(){
-    const keys = await getSelectedKeys();
-    if(!keys.length) return showToast('No files selected');
-    if(!confirm(`Delete ${keys.length} file(s)?`)) return;
-    try{
-      for(const k of keys){
-        const res = await fetch(API_BASE + '/files', { method:'DELETE', headers: Object.assign({'Content-Type':'application/json'}, buildHeaders()), body: JSON.stringify({ key: k }), credentials: 'include' });
-        if(!ensureJsonOrShowLogin(res)) return;
-      }
-      showToast('Deleted selected');
-      await listFiles();
-    }catch(err){
-      console.error('Bulk delete error', err);
-      showToast('Bulk delete failed (network)');
-    }
-  }
-
-  async function downloadSelected(){
-    const keys = await getSelectedKeys();
-    if(!keys.length) return showToast('No files selected');
-    for(const k of keys){ window.open(makeDownloadUrl(k), '_blank'); }
-  }
-
-  // Preview / Viewer
-  function openPreview(file){
-    viewerTitle.textContent = file.name || '';
-    viewerBody.innerHTML = '';
-    const name = (file.name || '').toLowerCase();
-    // prefer file.url if provided, otherwise use backend redirect link
-    const url = file.url || makeDownloadUrl(file.key);
-
-    if(name.match(/\.(png|jpe?g|gif|webp)$/)){
-      const img = document.createElement('img'); img.src = url; img.style.maxWidth='100%'; img.style.maxHeight='100%'; viewerBody.appendChild(img);
-    } else if(name.match(/\.(pdf)$/)){
-      const iframe = document.createElement('iframe');
-      iframe.src = url + '#toolbar=0&navpanes=0';
-      iframe.setAttribute('title', file.name || 'PDF');
-      iframe.style.width = '100%';
-      iframe.style.height = '80vh';
-      viewerBody.appendChild(iframe);
-    } else if(name.match(/\.(mp4|webm)$/)){
-      const vid = document.createElement('video'); vid.controls=true; vid.src = url; vid.style.maxWidth='100%'; viewerBody.appendChild(vid);
+    if (res.ok) {
+      showApp();
+      await loadFiles(); // initial load
     } else {
-      // attempt to fetch as text (may redirect to signed S3 url)
-      fetch(url, { credentials: 'include' }).then(r=>r.text()).then(txt=>{
-        const pre = document.createElement('pre'); pre.textContent = txt.slice(0, 20000); viewerBody.appendChild(pre);
-      }).catch(()=>{ const p = document.createElement('div'); p.textContent = 'Preview not available'; viewerBody.appendChild(p); });
+      showLogin();
     }
-    if(viewerModal){
-      viewerModal.classList.remove('hidden');
-      viewerModal.setAttribute('aria-hidden', 'false');
-      setTimeout(()=>{ if(closeViewer) closeViewer.focus(); }, 40);
+  } catch (err) {
+    console.error("Session check failed", err);
+    showLogin();
+  }
+}
+
+function showLogin() {
+  loginPage.classList.remove("hidden");
+  appRoot.classList.add("hidden");
+  loginMsg.textContent = "";
+}
+
+function showApp() {
+  loginPage.classList.add("hidden");
+  appRoot.classList.remove("hidden");
+}
+
+// login form submit
+if (loginForm) {
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const token = (loginToken && loginToken.value || "").trim();
+    if (!token) {
+      loginMsg.textContent = "Please enter token";
+      return;
     }
+    try {
+      const res = await fetch(`${BACKEND_URL}/admin/auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        loginMsg.textContent = "";
+        loginToken.value = "";
+        showApp();
+        await loadFiles();
+        showToast("Logged in ✅");
+      } else {
+        loginMsg.textContent = data.message || "Invalid token";
+      }
+    } catch (err) {
+      console.error("Login error", err);
+      loginMsg.textContent = "Login failed (network)";
+    }
+  });
+}
+
+// logout
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      await fetch(`${BACKEND_URL}/admin/logout`, {
+        method: "GET",
+        credentials: "include",
+      });
+    } catch (e) {
+      // ignore
+    }
+    showLogin();
+    showToast("Logged out");
+  });
+}
+
+// ---------- Files: load / render / pagination ----------
+async function loadFiles(opts = {}) {
+  // opts: { continuationToken, folder, limit }
+  const limit = opts.limit || 50;
+  const continuationToken = opts.continuationToken || undefined;
+  const folder = opts.folder || (folderFilter && folderFilter.value) || undefined;
+
+  // show loading state
+  filesTableBody.innerHTML = `<tr><td colspan="7">Loading…</td></tr>`;
+  try {
+    let url = `${BACKEND_URL}/files?limit=${limit}`;
+    if (typeof folder === "string" && folder !== "all" && folder !== "") {
+      url += `&folder=${encodeURIComponent(folder)}`;
+      currentFolder = folder;
+    } else {
+      currentFolder = "root";
+    }
+    if (continuationToken) url += `&continuationToken=${encodeURIComponent(continuationToken)}`;
+
+    const res = await fetch(url, { credentials: "include" });
+    const text = await res.text();
+    const data = JSON.parse(text);
+    if (!res.ok) throw new Error(data.message || "Failed to list files");
+
+    files = (data.files || []).map((f) => ({
+      ...f,
+      type: detectType(f.name),
+    }));
+    nextContinuationToken = data.nextContinuationToken || null;
+
+    // update prev tokens stack & buttons
+    prevPageBtn.disabled = prevTokens.length === 0;
+    nextPageBtn.disabled = !nextContinuationToken;
+
+    // render
+    renderFilesTable();
+  } catch (err) {
+    console.error("Load files error", err);
+    filesTableBody.innerHTML = `<tr><td colspan="7">Failed to load files</td></tr>`;
+    showToast("Failed to load files");
+  }
+}
+
+function renderFilesTable() {
+  // update counts/folder
+  fileCountSpan.textContent = `${files.length}`;
+  if (currentFolderLabel) currentFolderLabel.textContent = currentFolder;
+
+  if (!files.length) {
+    filesTableBody.innerHTML = `<tr><td colspan="7">No files found</td></tr>`;
+    return;
   }
 
-  function closePreview(){
-    if(viewerModal){
-      viewerModal.classList.add('hidden');
-      viewerModal.setAttribute('aria-hidden', 'true');
+  filesTableBody.innerHTML = files
+    .map((file) => {
+      const previewHtml = file.type === "image" ? `<img src="${makeDownloadUrlForKey(file.key)}" alt="thumb" />` : (file.type === "pdf" ? "PDF" : "");
+      return `
+        <tr data-key="${file.key}">
+          <td><input class="row-select" type="checkbox" data-key="${file.key}"></td>
+          <td class="previewCell">${previewHtml}</td>
+          <td class="nameCell">${escapeHtml(file.name)}</td>
+          <td>${escapeHtml(file.folder || "root")}</td>
+          <td>${formatSize(file.size)}</td>
+          <td>${formatDate(file.lastModified)}</td>
+          <td class="actionsCell">
+            <button class="previewBtn" data-key="${file.key}">Preview</button>
+            <button class="downloadBtn" data-key="${file.key}">Download</button>
+            <button class="deleteBtn" data-key="${file.key}">Delete</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  // attach listeners
+  filesTableBody.querySelectorAll(".previewBtn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const key = btn.dataset.key;
+      openPreview(key);
+    });
+  });
+  filesTableBody.querySelectorAll(".downloadBtn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const key = btn.dataset.key;
+      window.open(makeDownloadUrlForKey(key), "_blank");
+    });
+  });
+  filesTableBody.querySelectorAll(".deleteBtn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const key = btn.dataset.key;
+      if (!confirm("Delete this file?")) return;
+      await deleteFile(key);
+      await loadFiles();
+    });
+  });
+
+  // row checkbox behavior
+  const rowChecks = filesTableBody.querySelectorAll(".row-select");
+  rowChecks.forEach((ch) => {
+    ch.addEventListener("change", () => {
+      // update selectAll state
+      const all = filesTableBody.querySelectorAll(".row-select");
+      const checked = filesTableBody.querySelectorAll(".row-select:checked");
+      selectAllCheckbox.checked = all.length === checked.length && all.length > 0;
+    });
+  });
+}
+
+// escape HTML for safety
+function escapeHtml(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ---------- Preview ----------
+function openPreview(key) {
+  // Use backend download redirect URL inside an iframe. The backend will redirect to signed S3 URL.
+  const url = makeDownloadUrlForKey(key);
+
+  // For PDFs we embed an <iframe> directly; for images we also embed the file in an <img>.
+  const type = (files.find((f) => f.key === key) || {}).type || "other";
+  let html = "";
+  if (type === "pdf") {
+    html = `<iframe src="${url}" title="PDF preview" style="width:100%;height:100%;border:0"></iframe>`;
+  } else if (type === "image") {
+    html = `<img src="${url}" alt="image preview" style="max-width:100%;max-height:100%;display:block;margin:0 auto" />`;
+  } else {
+    html = `<div style="padding:20px;color:var(--muted)">Cannot preview this file type. <a href="${url}" target="_blank" rel="noopener noreferrer">Open file</a></div>`;
+  }
+
+  // Use the small viewer API exposed in the HTML
+  if (window && window.adminViewer && typeof window.adminViewer.open === "function") {
+    window.adminViewer.open(html);
+  } else {
+    // fallback: open in new tab
+    window.open(url, "_blank");
+  }
+}
+
+// ---------- Delete ----------
+async function deleteFile(key) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/files`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || "Delete failed");
+    showToast("Deleted");
+  } catch (err) {
+    console.error("Delete error", err);
+    showToast("Delete failed");
+  }
+}
+
+// ---------- Upload ----------
+if (uploadForm) {
+  uploadForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const file = uploadFile.files && uploadFile.files[0];
+    if (!file) {
+      showToast("Choose a file first");
+      return;
     }
-    if(viewerBody) viewerBody.innerHTML = '';
+    const folder = (uploadFolder && uploadFolder.value || "").trim();
+    await uploadSingleFile(file, folder);
+    // clear inputs
+    uploadFile.value = "";
+    uploadFolder.value = "";
+    // refresh list
+    await loadFiles();
+  });
+}
+
+if (clearUploadBtn) {
+  clearUploadBtn.addEventListener("click", () => {
+    if (uploadFile) uploadFile.value = "";
+    if (uploadFolder) uploadFolder.value = "";
+  });
+}
+
+async function uploadSingleFile(file, folder) {
+  const fd = new FormData();
+  fd.append("document", file);
+  if (folder) fd.append("folder", folder);
+  try {
+    const res = await fetch(`${BACKEND_URL}/upload`, {
+      method: "POST",
+      credentials: "include",
+      body: fd,
+    });
+    const text = await res.text();
+    const data = JSON.parse(text || "{}");
+    if (!res.ok) throw new Error(data.message || "Upload failed");
+    showToast("Uploaded");
+  } catch (err) {
+    console.error("Upload error", err);
+    showToast("Upload failed");
   }
+}
 
-  if(closeViewer) closeViewer.addEventListener('click', ()=>{ closePreview(); });
-  if(viewerModal) viewerModal.addEventListener('click', (e)=>{ if(e.target === viewerModal) closePreview(); });
-  const modalInner = document.querySelector('.modal-inner');
-  if(modalInner){ modalInner.addEventListener('click', (e)=>e.stopPropagation()); }
-  document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape' && viewerModal && !viewerModal.classList.contains('hidden')){ closePreview(); } });
+// ---------- Select all / selections ----------
+if (selectAllCheckbox) {
+  selectAllCheckbox.addEventListener("change", () => {
+    const checked = selectAllCheckbox.checked;
+    filesTableBody.querySelectorAll(".row-select").forEach((ch) => {
+      ch.checked = checked;
+    });
+  });
+}
 
-  // events
-  if(uploadForm) uploadForm.addEventListener('submit', uploadHandler);
-  const clearUploadBtn = document.getElementById('clearUpload');
-  if(clearUploadBtn) clearUploadBtn.addEventListener('click', ()=>{ if(uploadForm) uploadForm.reset(); });
-  if(refreshBtn) refreshBtn.addEventListener('click', ()=>listFiles());
-  const deleteSelectedBtn = document.getElementById('deleteSelected');
-  if(deleteSelectedBtn) deleteSelectedBtn.addEventListener('click', deleteSelected);
-  const downloadSelectedBtn = document.getElementById('downloadSelected');
-  if(downloadSelectedBtn) downloadSelectedBtn.addEventListener('click', downloadSelected);
-  if(prevBtn) prevBtn.addEventListener('click', async ()=>{ const prev = continuationStack.pop() || null; await listFiles(prev); });
-  if(nextBtn) nextBtn.addEventListener('click', async ()=>{ if(!nextContinuation) return; continuationStack.push(nextContinuation); await listFiles(nextContinuation); });
-  if(selectAll) selectAll.addEventListener('change', ()=>{ document.querySelectorAll('.rowCheck').forEach(ch=>ch.checked = selectAll.checked); });
+function getSelectedKeys() {
+  return Array.from(filesTableBody.querySelectorAll(".row-select:checked")).map(
+    (el) => el.dataset.key
+  );
+}
 
-  // search debounce
-  let searchTimer = null;
-  if(searchInput){
-    searchInput.addEventListener('input', ()=>{ clearTimeout(searchTimer); searchTimer = setTimeout(()=>{ const q = searchInput.value.trim().toLowerCase(); if(!q) return renderFiles(); const filtered = currentFiles.filter(f=> (f.name||'').toLowerCase().includes(q) || (f.folder||'').toLowerCase().includes(q)); renderFilesFromList(filtered); }, 300); });
-  }
+// ---------- Delete / Download selected ----------
+if (deleteSelectedBtn) {
+  deleteSelectedBtn.addEventListener("click", async () => {
+    const keys = getSelectedKeys();
+    if (!keys.length) {
+      showToast("No files selected");
+      return;
+    }
+    if (!confirm(`Delete ${keys.length} file(s)?`)) return;
+    for (const k of keys) {
+      // sequential deletes to keep it simple
+      // you can parallelize if you prefer
+      // eslint-disable-next-line no-await-in-loop
+      await deleteFile(k);
+    }
+    await loadFiles();
+  });
+}
 
-  // initial check: attempt to load files; if not authenticated, server will respond non-json and we show login
-  (async ()=>{
-    await listFiles();
-    // If server responded non-json, showLogin will have been called by ensureJsonOrShowLogin
-  })();
+if (downloadSelectedBtn) {
+  downloadSelectedBtn.addEventListener("click", () => {
+    const keys = getSelectedKeys();
+    if (!keys.length) {
+      showToast("No files selected");
+      return;
+    }
+    // open each selected file in a new tab (backend redirects to signed S3 url)
+    keys.forEach((k) => {
+      const url = makeDownloadUrlForKey(k);
+      window.open(url, "_blank");
+    });
+  });
+}
 
-})();
+// ---------- Pagination ----------
+if (nextPageBtn) {
+  nextPageBtn.addEventListener("click", async () => {
+    if (!nextContinuationToken) return;
+    // push current token to prev stack so Prev works
+    prevTokens.push(nextContinuationToken === null ? null : nextContinuationToken);
+    await loadFiles({ continuationToken: nextContinuationToken });
+  });
+}
+
+if (prevPageBtn) {
+  prevPageBtn.addEventListener("click", async () => {
+    if (prevTokens.length === 0) return;
+    // pop to get token for previous page context (we stored tokens on Next)
+    // simple approach: reload without token to go to start if stack becomes empty
+    prevTokens.pop(); // remove current
+    const prevToken = prevTokens.length ? prevTokens[prevTokens.length - 1] : undefined;
+    await loadFiles({ continuationToken: prevToken });
+  });
+}
+
+// folder filter / search refresh
+if (folderFilter) {
+  folderFilter.addEventListener("change", () => {
+    // reset pagination
+    prevTokens = [];
+    nextContinuationToken = null;
+    loadFiles({ folder: folderFilter.value });
+  });
+}
+if (searchInput) {
+  searchInput.addEventListener("input", () => {
+    // client-side search on the currently loaded page
+    const q = (searchInput.value || "").toLowerCase().trim();
+    if (!q) {
+      renderFilesTable();
+      return;
+    }
+    const filtered = files.filter((f) => (f.name || "").toLowerCase().includes(q));
+    const oldFiles = files;
+    files = filtered;
+    renderFilesTable();
+    files = oldFiles;
+  });
+}
+
+// refresh button
+if (refreshBtn) {
+  refreshBtn.addEventListener("click", async () => {
+    prevTokens = [];
+    nextContinuationToken = null;
+    await loadFiles();
+  });
+}
+
+// ---------- Utilities ----------
+window.addEventListener("error", (e) => {
+  // show less noisy message
+  // console.error("Global error", e);
+});
+
+// ---------- Init ----------
+document.addEventListener("DOMContentLoaded", () => {
+  checkSession();
+});
