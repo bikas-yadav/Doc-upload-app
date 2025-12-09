@@ -5,7 +5,7 @@ const multer = require("multer");
 const aws = require("aws-sdk");
 const path = require("path");
 const compression = require("compression");
-const session = require("express-session"); // NEW
+const session = require("express-session");
 const crypto = require("crypto");
 
 const app = express();
@@ -25,14 +25,13 @@ aws.config.update({
 const S3 = new aws.S3();
 const S3_BUCKET = BUCKET_NAME;
 
-// ✅ ADMIN TOKEN (set this in environment variables)
+// ✅ ADMIN TOKEN (set this in Render environment variables)
+// used for login form validation
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
-// SESSION secret (required)
+// SESSION secret (required for signing cookies)
 const SESSION_SECRET =
-  process.env.SESSION_SECRET ||
-  // fallback to a generated secret if not provided (production: set env var)
-  crypto.randomBytes(32).toString("hex");
+  process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
 // ==============================
 
@@ -56,7 +55,7 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // set secure cookie in prod (requires HTTPS)
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 1000 * 60 * 60 * 4, // 4 hours
     },
@@ -76,8 +75,8 @@ function safeFolderName(folderRaw) {
   return trimmed.replace(/[^\w\-]/g, "_").toLowerCase();
 }
 
-// Simple admin auth middleware (kept for optional use)
-function requireAdmin(req, res, next) {
+// Simple admin auth middleware for API (optional re-use)
+function requireAdminHeader(req, res, next) {
   const token =
     req.headers["x-admin-token"] ||
     (req.headers["authorization"] || "").replace("Bearer ", "");
@@ -97,7 +96,6 @@ function requireAdmin(req, res, next) {
 // Middleware to protect the admin UI using session
 function requireLoggedIn(req, res, next) {
   if (req.session && req.session.isAdmin) return next();
-  // redirect to login page
   return res.redirect("/admin/login");
 }
 
@@ -127,17 +125,19 @@ function makeSignedUrl(key, expiresSeconds = 60 * 60) {
 }
 // ------------------------------
 
-// Serve public assets (non-admin) from public/
+// Serve generic public folder (if you have one)
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // --- Admin UI routes ---
-// Place your admin files in /public/admin/*. (e.g. public/admin/admin.html, admin.css, admin.js)
+// Place your admin files in frontend/ (sibling of backend/)
+// Example: frontend/admin.html or frontend/index.html
+// We'll mount that folder at /admin and protect it with the session middleware.
 
-// Login page (simple form). You can replace this with a custom static page if you want.
+// Login page (simple form)
 app.get("/admin/login", (req, res) => {
   // If already logged in, redirect to admin index
   if (req.session && req.session.isAdmin) return res.redirect("/admin");
-  // Simple login form
+  // Simple login form (you can replace with your static file later)
   res.send(`
     <!doctype html>
     <html>
@@ -175,7 +175,6 @@ app.post("/admin/login", (req, res) => {
     return res.status(500).send("Server admin not configured");
   }
   if (!token || token !== ADMIN_TOKEN) {
-    // simple failure - could add rate limiting in future
     return res.status(401).send(`
       <p>Invalid token. <a href="/admin/login">Try again</a></p>
     `);
@@ -183,7 +182,6 @@ app.post("/admin/login", (req, res) => {
 
   // success: mark session
   req.session.isAdmin = true;
-  // redirect to admin index (protected)
   return res.redirect("/admin");
 });
 
@@ -195,17 +193,15 @@ app.get("/admin/logout", (req, res) => {
   });
 });
 
-// Serve admin static assets behind login
-// All files under public/admin will be served here, but only if logged in.
+// Mount admin static files from ../frontend at the /admin route, but protect them first
 app.use(
   "/admin",
-  // protect all /admin/* routes
   (req, res, next) => {
-    // allow the login routes above to pass through
+    // allow the login/logout routes to pass without session checks
     if (req.path === "/login" || req.path === "/logout") return next();
     return requireLoggedIn(req, res, next);
   },
-  express.static(path.join(__dirname, "..", "public", "admin"))
+  express.static(path.join(__dirname, "..", "frontend"))
 );
 
 // Root / simple check
@@ -218,8 +214,13 @@ app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
-// 🔓 Upload endpoint: PUBLIC (no admin required) to match your frontend behavior
-// expects form field name "document"
+// ---------------------------------------------------------------------
+// Your existing API endpoints (kept public as in your original code)
+// If you want to protect them as well, add `requireLoggedIn` or `requireAdminHeader`
+// as middleware to each route below (I'll keep them public for now).
+// ---------------------------------------------------------------------
+
+// Upload endpoint
 app.post(
   "/upload",
   upload.single("document"),
@@ -238,8 +239,7 @@ app.post(
         .replace(/[^\w\-]/g, "_");
 
       // Folder from form
-      const rawFolder =
-        req.body && req.body.folder ? req.body.folder : "";
+      const rawFolder = req.body && req.body.folder ? req.body.folder : "";
       let folderSafe = rawFolder || "root";
       folderSafe = safeFolderName(folderSafe);
 
@@ -294,7 +294,7 @@ app.post(
   }
 );
 
-// ✅ List files: PUBLIC (read-only)
+// List files
 app.get("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
@@ -353,9 +353,7 @@ app.get("/files", async (req, res) => {
 
     res.json({
       files,
-      nextContinuationToken: data.IsTruncated
-        ? data.NextContinuationToken
-        : null,
+      nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null,
     });
   } catch (err) {
     console.error("Error listing files:", err);
@@ -366,7 +364,7 @@ app.get("/files", async (req, res) => {
   }
 });
 
-// 🔓 Delete file: PUBLIC (no admin required) to match your frontend
+// Delete file
 app.delete("/files", async (req, res) => {
   try {
     if (!S3_BUCKET) {
@@ -389,7 +387,7 @@ app.delete("/files", async (req, res) => {
   }
 });
 
-// ✅ Download endpoint: redirect to signed URL so browser can download/open directly
+// Download endpoint (redirect to signed URL)
 app.get("/files/download", async (req, res) => {
   try {
     const key = req.query.key;
@@ -408,7 +406,6 @@ app.get("/files/download", async (req, res) => {
       ResponseContentDisposition: "attachment",
     });
 
-    // Redirect the browser to the signed URL (so window.location.href works)
     return res.redirect(url);
   } catch (err) {
     console.error("Download URL error:", err);
@@ -419,16 +416,12 @@ app.get("/files/download", async (req, res) => {
   }
 });
 
-// 🔓 Rename file (within same folder): PUBLIC (no admin required) to match frontend
+// Rename file
 app.put("/files/rename", async (req, res) => {
   try {
     const { key, newName } = req.body || {};
     if (!key || !newName) {
       return res.status(400).json({ message: "Missing 'key' or 'newName'" });
-    }
-
-    if (!S3_BUCKET) {
-      return res.status(500).json({ message: "S3 bucket not configured" });
     }
 
     const keyParts = key.split("/");
@@ -464,16 +457,12 @@ app.put("/files/rename", async (req, res) => {
   }
 });
 
-// 🔓 Move file to another folder: PUBLIC (no admin required) to match frontend
+// Move file
 app.put("/files/move", async (req, res) => {
   try {
     const { key, newFolder } = req.body || {};
     if (!key || !newFolder) {
       return res.status(400).json({ message: "Missing 'key' or 'newFolder'" });
-    }
-
-    if (!S3_BUCKET) {
-      return res.status(500).json({ message: "S3 bucket not configured" });
     }
 
     const folderSafe = safeFolderName(newFolder);
