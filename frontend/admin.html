@@ -1,4 +1,3 @@
-<!-- admin.html -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -8,7 +7,18 @@
   <link rel="stylesheet" href="admin.css" />
 </head>
 <body>
-  <div class="app">
+  <div id="loginPage" class="auth-page">
+    <div class="auth-card">
+      <h2>Sign in to Study Drive Admin</h2>
+      <form id="loginForm">
+        <input id="loginToken" name="token" type="password" placeholder="Admin token / password" required />
+        <button type="submit">Sign in</button>
+      </form>
+      <div id="loginMsg" class="note"></div>
+    </div>
+  </div>
+
+  <div id="app" class="app hidden" aria-hidden="true">
     <header class="topbar">
       <div class="brand">Study Drive — Admin</div>
       <div class="controls">
@@ -16,6 +26,7 @@
         <input id="searchInput" placeholder="Search files" />
         <button id="refreshBtn">Refresh</button>
         <button id="themeToggle" title="Toggle theme">🌙</button>
+        <button id="logoutBtn" title="Logout">Logout</button>
       </div>
     </header>
 
@@ -84,20 +95,8 @@
         <div id="viewerBody" class="viewer-body"></div>
       </div>
     </div>
-
-    <template id="fileRow">
-      <tr>
-        <td><input class="rowCheck" type="checkbox" /></td>
-        <td class="previewCell"></td>
-        <td class="nameCell"></td>
-        <td class="folderCell"></td>
-        <td class="sizeCell"></td>
-        <td class="modCell"></td>
-        <td class="actionsCell"></td>
-      </tr>
-    </template>
-
-    <script src="admin.js"></script>
   </div>
+
+  <script src="admin.js"></script>
 </body>
 </html>
