@@ -1,4 +1,4 @@
-// backend/server.js
+// backend/server.js (updated)
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -29,10 +29,11 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 const SESSION_SECRET =
   process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
+// Optional: protect API endpoints (set PROTECT_API=true in env to require login for upload/list/delete/rename/move)
+const PROTECT_API = String(process.env.PROTECT_API || "").toLowerCase() === "true";
+
 // ==============================
 
-// CORS: keep permissive for API but allow credentials if needed.
-// Note: admin UI uses same-origin fetch with credentials:'same-origin' so CORS here is not critical.
 app.use(
   cors({
     origin: true,
@@ -97,31 +98,85 @@ function makeSignedUrl(key, expiresSeconds = 60 * 60) {
     Expires: expiresSeconds,
   });
 }
+
+function extractTokenFromReq(req) {
+  // Accept token from JSON body, x-admin-token header, or Authorization: Bearer ...
+  let token = null;
+  if (req.body && typeof req.body.token === "string") token = req.body.token;
+  if (!token && req.headers["x-admin-token"]) token = req.headers["x-admin-token"];
+  if (!token && req.headers["authorization"]) {
+    const auth = String(req.headers["authorization"]);
+    if (auth.toLowerCase().startsWith("bearer ")) token = auth.slice(7);
+  }
+  if (typeof token === "string") return token.trim();
+  return null;
+}
+
+function requireLoggedInSession(req, res, next) {
+  if (req.session && req.session.isAdmin) return next();
+  return res.status(401).json({ ok: false, message: "Not authenticated" });
+}
+
+function requireAdminTokenHeader(req, res, next) {
+  // fallback: allow x-admin-token on API calls (useful for scripts)
+  const token = extractTokenFromReq(req);
+  if (token && ADMIN_TOKEN && token === ADMIN_TOKEN) return next();
+  return res.status(403).json({ ok: false, message: "Forbidden" });
+}
+
+// If PROTECT_API is enabled, require session for API endpoints
+function apiAuthMiddleware(req, res, next) {
+  if (!PROTECT_API) return next();
+  return requireLoggedInSession(req, res, next);
+}
+
 // ------------------------------
 
 // Serve generic public folder (if any)
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // Serve admin static files from frontend/ at /admin
-// NOTE: admin.html contains the login UI — no server-side HTML login page needed.
 app.use("/admin", express.static(path.join(__dirname, "..", "frontend")));
 
-// Authentication endpoint used by admin.js (returns JSON)
-// Expects: { token: "..." } (JSON)
-// On success sets req.session.isAdmin = true
+// Auth endpoint used by admin.js (returns JSON)
+// Accepts token in body/header; uses trimmed compare
 app.post("/admin/auth", (req, res) => {
-  const { token } = req.body || {};
+  const token = extractTokenFromReq(req);
+
   if (!ADMIN_TOKEN) {
     console.error("ADMIN_TOKEN not set in environment!");
     return res.status(500).json({ ok: false, message: "Server admin not configured" });
   }
-  if (!token || token !== ADMIN_TOKEN) {
+
+  if (!token) {
+    return res.status(400).json({ ok: false, message: "Missing token" });
+  }
+
+  if (token !== ADMIN_TOKEN) {
+    // do not print the token itself; only log length for debugging if not prod
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`Failed admin login attempt — token length: ${token.length}`);
+    }
     return res.status(401).json({ ok: false, message: "Invalid token" });
   }
 
-  // success
+  // success -> set session
   req.session.isAdmin = true;
   return res.json({ ok: true, message: "Authenticated" });
+});
+
+// Session check endpoint
+app.get("/admin/session", (req, res) => {
+  if (req.session && req.session.isAdmin) return res.json({ ok: true });
+  return res.status(401).json({ ok: false });
+});
+
+// Debug endpoint (only in non-production). Shows presence and length of ADMIN_TOKEN (not value).
+app.get("/admin/debug", (req, res) => {
+  if (process.env.NODE_ENV === "production") return res.status(404).send("Not found");
+  const present = !!ADMIN_TOKEN;
+  const len = ADMIN_TOKEN ? String(ADMIN_TOKEN).length : 0;
+  return res.json({ ok: true, adminTokenPresent: present, adminTokenLength: len, protectApi: PROTECT_API });
 });
 
 // Logout (clears session)
@@ -132,200 +187,120 @@ app.get("/admin/logout", (req, res) => {
   });
 });
 
-// Root / simple check
+// Root / health
 app.get("/", (req, res) => {
   res.send("Study Drive backend (S3) is running ✅");
 });
+app.get("/health", (req, res) => res.status(200).send("OK"));
 
-// Dedicated health check
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
+// -----------------
+// API endpoints
+// If PROTECT_API=true then these require a valid logged-in session.
+// If PROTECT_API=false they remain public. (You can also allow x-admin-token header via requireAdminTokenHeader)
+app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+    const file = req.file;
+    const originalName = file.originalname || "file";
+    const ext = path.extname(originalName);
+    let baseName = path
+      .basename(originalName, ext)
+      .replace(/\s+/g, "_")
+      .replace(/[^\w\-]/g, "_");
+
+    const rawFolder = req.body && req.body.folder ? req.body.folder : "";
+    let folderSafe = rawFolder || "root";
+    folderSafe = safeFolderName(folderSafe);
+
+    let finalName = `${baseName}${ext}`;
+    let key = `uploads/${folderSafe}/${finalName}`;
+
+    let counter = 1;
+    while (true) {
+      try {
+        await S3.headObject({ Bucket: S3_BUCKET, Key: key }).promise();
+        finalName = `${baseName}(${counter})${ext}`;
+        key = `uploads/${folderSafe}/${finalName}`;
+        counter++;
+      } catch (err) {
+        break;
+      }
+    }
+
+    const params = {
+      Bucket: S3_BUCKET,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+      ACL: "private",
+    };
+
+    await S3.upload(params).promise();
+    const signedUrl = makeSignedUrl(key, 3600);
+
+    res.json({
+      message: "File uploaded successfully!",
+      file: { originalName: finalName, key, size: file.size, folder: folderSafe, url: signedUrl },
+    });
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({ message: "Failed to upload file", error: err.message });
+  }
 });
 
-// -----------------
-// API endpoints (upload/list/download/rename/move/delete)
-// These are left public as in your original implementation.
-// If you'd like, we can require session for these by checking req.session.isAdmin
-// -----------------
-
-// Upload endpoint
-app.post(
-  "/upload",
-  upload.single("document"),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ message: "No file uploaded" });
-      }
-
-      const file = req.file;
-      const originalName = file.originalname || "file";
-      const ext = path.extname(originalName);
-      let baseName = path
-        .basename(originalName, ext)
-        .replace(/\s+/g, "_")
-        .replace(/[^\w\-]/g, "_");
-
-      // Folder from form
-      const rawFolder = req.body && req.body.folder ? req.body.folder : "";
-      let folderSafe = rawFolder || "root";
-      folderSafe = safeFolderName(folderSafe);
-
-      // Start with clean filename
-      let finalName = `${baseName}${ext}`;
-      let key = `uploads/${folderSafe}/${finalName}`;
-
-      // AUTO-INCREMENT LOGIC
-      let counter = 1;
-      while (true) {
-        try {
-          await S3.headObject({ Bucket: S3_BUCKET, Key: key }).promise();
-          finalName = `${baseName}(${counter})${ext}`;
-          key = `uploads/${folderSafe}/${finalName}`;
-          counter++;
-        } catch (err) {
-          // headObject failed => file does not exist => stop
-          break;
-        }
-      }
-
-      // Upload to S3
-      const params = {
-        Bucket: S3_BUCKET,
-        Key: key,
-        Body: file.buffer,
-        ContentType: file.mimetype,
-        ACL: "private",
-      };
-
-      await S3.upload(params).promise();
-
-      const signedUrl = makeSignedUrl(key, 3600);
-
-      res.json({
-        message: "File uploaded successfully!",
-        file: {
-          originalName: finalName,
-          key,
-          size: file.size,
-          folder: folderSafe,
-          url: signedUrl,
-        },
-      });
-    } catch (err) {
-      console.error("Upload error:", err);
-      res.status(500).json({
-        message: "Failed to upload file",
-        error: err.message,
-      });
-    }
-  }
-);
-
-// List files
-app.get("/files", async (req, res) => {
+app.get("/files", apiAuthMiddleware, async (req, res) => {
   try {
-    if (!S3_BUCKET) {
-      return res.status(500).json({ message: "S3 bucket not configured" });
-    }
+    if (!S3_BUCKET) return res.status(500).json({ message: "S3 bucket not configured" });
 
     const rawLimit = parseInt(req.query.limit, 10);
     const limit = Number.isNaN(rawLimit) ? 100 : Math.min(rawLimit, 200);
     const continuationToken = req.query.continuationToken || undefined;
-    const folderQuery = req.query.folder
-      ? safeFolderName(req.query.folder)
-      : null;
-
+    const folderQuery = req.query.folder ? safeFolderName(req.query.folder) : null;
     const prefix = folderQuery ? `uploads/${folderQuery}/` : "uploads/";
 
-    const params = {
-      Bucket: S3_BUCKET,
-      Prefix: prefix,
-      MaxKeys: limit,
-    };
-
-    if (continuationToken) {
-      params.ContinuationToken = continuationToken;
-    }
+    const params = { Bucket: S3_BUCKET, Prefix: prefix, MaxKeys: limit };
+    if (continuationToken) params.ContinuationToken = continuationToken;
 
     const data = await S3.listObjectsV2(params).promise();
-
     const files = (data.Contents || [])
       .filter((obj) => obj.Key !== "uploads/")
       .map((obj) => {
         const key = obj.Key;
-        let relative = key.startsWith("uploads/")
-          ? key.slice("uploads/".length)
-          : key;
-
+        let relative = key.startsWith("uploads/") ? key.slice("uploads/".length) : key;
         const parts = relative.split("/");
         let folder = "root";
         let name = relative;
-
-        if (parts.length > 1) {
-          folder = parts[0];
-          name = parts.slice(1).join("/");
-        }
-
+        if (parts.length > 1) { folder = parts[0]; name = parts.slice(1).join("/"); }
         const signedUrl = makeSignedUrl(key);
-
-        return {
-          name,
-          key,
-          size: obj.Size,
-          lastModified: obj.LastModified,
-          url: signedUrl,
-          folder,
-        };
+        return { name, key, size: obj.Size, lastModified: obj.LastModified, url: signedUrl, folder };
       });
 
-    res.json({
-      files,
-      nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null,
-    });
+    res.json({ files, nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null });
   } catch (err) {
     console.error("Error listing files:", err);
-    res.status(500).json({
-      message: "Failed to list files",
-      error: err.message,
-    });
+    res.status(500).json({ message: "Failed to list files", error: err.message });
   }
 });
 
-// Delete file
-app.delete("/files", async (req, res) => {
+app.delete("/files", apiAuthMiddleware, async (req, res) => {
   try {
-    if (!S3_BUCKET) {
-      return res.status(500).json({ message: "S3 bucket not configured" });
-    }
-
+    if (!S3_BUCKET) return res.status(500).json({ message: "S3 bucket not configured" });
     const { key } = req.body || {};
-    if (!key) {
-      return res.status(400).json({ message: "Missing 'key' in request body" });
-    }
-
+    if (!key) return res.status(400).json({ message: "Missing 'key' in request body" });
     await deleteObjectInBucket(key);
     res.json({ message: "File deleted", key });
   } catch (err) {
     console.error("Error deleting file:", err);
-    res.status(500).json({
-      message: "Failed to delete file",
-      error: err.message,
-    });
+    res.status(500).json({ message: "Failed to delete file", error: err.message });
   }
 });
 
-// Download endpoint (redirect to signed URL)
-app.get("/files/download", async (req, res) => {
+app.get("/files/download", apiAuthMiddleware, async (req, res) => {
   try {
     const key = req.query.key;
-    if (!key) {
-      return res.status(400).json({ message: "Missing 'key' query param" });
-    }
-
-    if (!S3_BUCKET) {
-      return res.status(500).json({ message: "S3 bucket not configured" });
-    }
+    if (!key) return res.status(400).json({ message: "Missing 'key' query param" });
+    if (!S3_BUCKET) return res.status(500).json({ message: "S3 bucket not configured" });
 
     const url = S3.getSignedUrl("getObject", {
       Bucket: S3_BUCKET,
@@ -333,29 +308,20 @@ app.get("/files/download", async (req, res) => {
       Expires: 60 * 60,
       ResponseContentDisposition: "attachment",
     });
-
     return res.redirect(url);
   } catch (err) {
     console.error("Download URL error:", err);
-    res.status(500).json({
-      message: "Failed to generate download URL",
-      error: err.message,
-    });
+    res.status(500).json({ message: "Failed to generate download URL", error: err.message });
   }
 });
 
-// Rename file
-app.put("/files/rename", async (req, res) => {
+app.put("/files/rename", apiAuthMiddleware, async (req, res) => {
   try {
     const { key, newName } = req.body || {};
-    if (!key || !newName) {
-      return res.status(400).json({ message: "Missing 'key' or 'newName'" });
-    }
+    if (!key || !newName) return res.status(400).json({ message: "Missing 'key' or 'newName'" });
 
     const keyParts = key.split("/");
-    if (keyParts.length < 3) {
-      return res.status(400).json({ message: "Invalid key format" });
-    }
+    if (keyParts.length < 3) return res.status(400).json({ message: "Invalid key format" });
 
     const folder = keyParts[1];
     const ext = path.extname(key);
@@ -367,38 +333,21 @@ app.put("/files/rename", async (req, res) => {
 
     const signedUrl = makeSignedUrl(newKey);
 
-    res.json({
-      message: "File renamed",
-      file: {
-        key: newKey,
-        name: `${safeNewBase}${ext}`,
-        folder,
-        url: signedUrl,
-      },
-    });
+    res.json({ message: "File renamed", file: { key: newKey, name: `${safeNewBase}${ext}`, folder, url: signedUrl } });
   } catch (err) {
     console.error("Rename error:", err);
-    res.status(500).json({
-      message: "Failed to rename file",
-      error: err.message,
-    });
+    res.status(500).json({ message: "Failed to rename file", error: err.message });
   }
 });
 
-// Move file
-app.put("/files/move", async (req, res) => {
+app.put("/files/move", apiAuthMiddleware, async (req, res) => {
   try {
     const { key, newFolder } = req.body || {};
-    if (!key || !newFolder) {
-      return res.status(400).json({ message: "Missing 'key' or 'newFolder'" });
-    }
+    if (!key || !newFolder) return res.status(400).json({ message: "Missing 'key' or 'newFolder'" });
 
     const folderSafe = safeFolderName(newFolder);
-
     const keyParts = key.split("/");
-    if (keyParts.length < 3) {
-      return res.status(400).json({ message: "Invalid key format" });
-    }
+    if (keyParts.length < 3) return res.status(400).json({ message: "Invalid key format" });
 
     const filename = keyParts[keyParts.length - 1];
     const newKey = `uploads/${folderSafe}/${filename}`;
@@ -408,34 +357,23 @@ app.put("/files/move", async (req, res) => {
 
     const signedUrl = makeSignedUrl(newKey);
 
-    res.json({
-      message: "File moved",
-      file: {
-        key: newKey,
-        name: filename,
-        folder: folderSafe,
-        url: signedUrl,
-      },
-    });
+    res.json({ message: "File moved", file: { key: newKey, name: filename, folder: folderSafe, url: signedUrl } });
   } catch (err) {
     console.error("Move error:", err);
-    res.status(500).json({
-      message: "Failed to move file",
-      error: err.message,
-    });
+    res.status(500).json({ message: "Failed to move file", error: err.message });
   }
 });
 
 // Fallback error handler
 app.use((err, req, res, next) => {
   console.error("GLOBAL ERROR:", err);
-  res.status(500).json({
-    message: "Server error",
-    error: err.message || err,
-  });
+  res.status(500).json({ message: "Server error", error: err.message || err });
 });
 
 app.listen(PORT, () => {
   console.log(`✅ Study Drive backend running on port ${PORT}`);
-  console.log(`🔒 Admin UI available at /admin (frontend/admin.html handles login)`); 
+  console.log(`🔒 Admin UI available at /admin (frontend/admin.html handles login)`);
+  if (process.env.NODE_ENV !== "production") {
+    console.log("Debug: /admin/debug available (non-production only)");
+  }
 });
