@@ -146,6 +146,11 @@ function showSelectedFiles(filesList) {
     .join("");
 }
 
+// utility to compute download/preview URL (backend redirect to signed S3 url)
+function makeDownloadUrlForKey(key) {
+  return `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`;
+}
+
 // ===== API: load/delete/download/rename/move =====
 async function loadFileList() {
   if (!fileListDiv) return;
@@ -160,7 +165,8 @@ async function loadFileList() {
   `;
 
   try {
-    const res = await fetch(`${BACKEND_URL}/files`);
+    // request a smaller page for fast initial load
+    const res = await fetch(`${BACKEND_URL}/files?limit=50`);
     const text = await res.text();
     let data;
     try {
@@ -173,10 +179,12 @@ async function loadFileList() {
       throw new Error(data.message || "Failed to load files");
     }
 
+    // map server metadata to frontend model; do NOT rely on file.url existing
     const files = (data.files || []).map((f) => ({
       ...f,
       type: detectType(f.name),
       folder: f.folder || "root",
+      // do not set url here unless server provided it; compute on demand with makeDownloadUrlForKey
     }));
 
     allFiles = files;
@@ -232,7 +240,8 @@ async function deleteFile(key) {
 
 async function handleDownload(key) {
   try {
-    const url = `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`;
+    const url = makeDownloadUrlForKey(key);
+    // use location.href to trigger the backend redirect to signed S3 URL
     window.location.href = url;
   } catch (err) {
     console.error("Download error:", err);
@@ -366,25 +375,26 @@ function renderFileList() {
       const folderText = file.folder || "root";
       const isFav = favoriteKeys.includes(file.key);
 
+      // compute download/open URL on-demand (backend will redirect to signed S3 URL)
+      const downloadUrl = makeDownloadUrlForKey(file.key);
+
       return `
-        <div class="file-item" data-url="${file.url}" data-type="${typeClass}" data-key="${file.key}">
+        <div class="file-item" data-download="${downloadUrl}" data-type="${typeClass}" data-key="${file.key}">
           <div class="file-icon ${typeClass}">${iconText}</div>
           <div class="file-main">
             <p class="file-name" title="${file.name || ""}">
               ${file.name || "Untitled file"}
             </p>
             <p class="file-meta">
-              [${folderText}] · ${sizeText || ""}${sizeText && dateText ? " · " : ""
-        }${dateText || ""}
+              [${folderText}] · ${sizeText || ""}${sizeText && dateText ? " · " : ""}${dateText || ""}
             </p>
           </div>
           <div class="file-actions">
-            <button type="button" class="favorite-btn ${isFav ? "is-favorite" : ""
-        }" title="Favorite">
+            <button type="button" class="favorite-btn ${isFav ? "is-favorite" : ""}" title="Favorite">
               ${isFav ? "★" : "☆"}
             </button>
             <button type="button" class="preview-btn">Preview</button>
-            <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
+            <a class="open-link" href="${downloadUrl}" target="_blank" rel="noopener noreferrer">Open</a>
             <button type="button" class="download-btn">Download</button>
             <button type="button" class="details-btn">Details</button>
             <button type="button" class="delete-btn">Delete</button>
@@ -395,7 +405,7 @@ function renderFileList() {
     .join("");
 
   fileListDiv.querySelectorAll(".file-item").forEach((item) => {
-    const url = item.getAttribute("data-url");
+    const downloadUrl = item.getAttribute("data-download");
     const type = item.getAttribute("data-type");
     const key = item.getAttribute("data-key");
     const previewBtn = item.querySelector(".preview-btn");
@@ -406,7 +416,7 @@ function renderFileList() {
 
     previewBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      openPreview(url, type);
+      openPreview(downloadUrl, type);
     });
 
     deleteBtn.addEventListener("click", async (e) => {
@@ -434,7 +444,7 @@ function renderFileList() {
 
     item.addEventListener("click", (e) => {
       if (e.target.closest(".file-actions")) return;
-      openPreview(url, type);
+      openPreview(downloadUrl, type);
     });
   });
 }
@@ -549,7 +559,7 @@ async function handleFilesSelected(filesList) {
   if (fileInput) fileInput.value = "";
 
   // 🔹 clear list under drop zone after upload
-  // showSelectedFiles([]);
+  showSelectedFiles([]);
 
   await loadFileList();
 }
@@ -606,7 +616,9 @@ function setupDragAndDrop() {
 
 // ===== Preview modal =====
 function openPreview(url, type) {
+  // url is the backend download endpoint which redirects to a signed S3 URL
   if (!previewModal || !previewBody) {
+    // fallback: open in new tab
     window.open(url, "_blank");
     return;
   }
@@ -614,8 +626,10 @@ function openPreview(url, type) {
   previewBody.innerHTML = "";
 
   if (type === "pdf") {
+    // embed the redirect URL — the browser follows the redirect to the signed S3 URL
     previewBody.innerHTML = `<iframe src="${url}" title="PDF preview"></iframe>`;
   } else if (type === "image") {
+    // images should load via the redirect URL as well
     previewBody.innerHTML = `<img src="${url}" alt="Image preview" />`;
   } else {
     previewBody.innerHTML = `
@@ -641,6 +655,9 @@ function openDetails(file) {
   const sizeText = formatSize(file.size);
   const dateText = formatDate(file.lastModified);
   const typeText = file.type || detectType(file.name);
+
+  // make shareable backend link (redirect to signed url)
+  const shareableLink = makeDownloadUrlForKey(file.key);
 
   detailsBody.innerHTML = `
     <h3 style="margin:0 0 8px;font-size:15px;">File details</h3>
@@ -677,7 +694,7 @@ function openDetails(file) {
       <div>
         <label style="font-size:12px;display:block;margin-bottom:2px;">Share / open link</label>
         <div style="display:flex;gap:6px;">
-          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${file.url}" />
+          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${shareableLink}" />
           <button id="copyLinkBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#111827;color:#e5e7eb;font-size:12px;cursor:pointer;">Copy</button>
         </div>
       </div>
