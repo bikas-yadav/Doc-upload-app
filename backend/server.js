@@ -1,4 +1,4 @@
-// backend/server.js (updated)
+// backend/server.js (updated - faster /files listing with in-memory cache)
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -194,9 +194,35 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => res.status(200).send("OK"));
 
 // -----------------
-// API endpoints
-// If PROTECT_API=true then these require a valid logged-in session.
-// If PROTECT_API=false they remain public. (You can also allow x-admin-token header via requireAdminTokenHeader)
+// Simple in-memory TTL cache (no external deps) used for listing
+const listCache = new Map(); // key -> {expires: timestamp, value}
+
+function makeCacheKey(prefix, limit, continuationToken, includeUrl) {
+  return `${prefix}|limit:${limit}|cont:${continuationToken || ""}|url:${includeUrl ? "1" : "0"}`;
+}
+
+function setCache(key, value, ttlSeconds = 10) {
+  const expires = Date.now() + ttlSeconds * 1000;
+  listCache.set(key, { expires, value });
+  // lazy cleanup: schedule removal slightly after expiry
+  setTimeout(() => {
+    const entry = listCache.get(key);
+    if (entry && entry.expires <= Date.now()) listCache.delete(key);
+  }, ttlSeconds * 1000 + 500);
+}
+
+function getCache(key) {
+  const entry = listCache.get(key);
+  if (!entry) return null;
+  if (entry.expires <= Date.now()) {
+    listCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+// ---------- UPLOAD / FILES / DOWNLOAD / DELETE / RENAME / MOVE ----------
+
 app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -239,6 +265,9 @@ app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, re
     await S3.upload(params).promise();
     const signedUrl = makeSignedUrl(key, 3600);
 
+    // invalidate small related caches (simple approach: clear entire list cache)
+    listCache.clear();
+
     res.json({
       message: "File uploaded successfully!",
       file: { originalName: finalName, key, size: file.size, folder: folderSafe, url: signedUrl },
@@ -249,34 +278,84 @@ app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, re
   }
 });
 
+// Faster, cached /files endpoint
 app.get("/files", apiAuthMiddleware, async (req, res) => {
   try {
     if (!S3_BUCKET) return res.status(500).json({ message: "S3 bucket not configured" });
 
+    // Defaults and safety
     const rawLimit = parseInt(req.query.limit, 10);
-    const limit = Number.isNaN(rawLimit) ? 100 : Math.min(rawLimit, 200);
+    // default smaller page size to make initial load faster
+    const DEFAULT_LIMIT = 50;
+    const limit = Number.isNaN(rawLimit) ? DEFAULT_LIMIT : Math.min(Math.max(rawLimit, 1), 200);
+
     const continuationToken = req.query.continuationToken || undefined;
     const folderQuery = req.query.folder ? safeFolderName(req.query.folder) : null;
     const prefix = folderQuery ? `uploads/${folderQuery}/` : "uploads/";
+
+    // By default do NOT include signed urls for every file (slow).
+    // Frontend should call /files/download?key=... to fetch on-demand.
+    // If includeUrl=true is provided, we will generate signed urls (for small page sizes).
+    const includeUrl = String(req.query.includeUrl || "false").toLowerCase() === "true";
+
+    const cacheKey = makeCacheKey(prefix, limit, continuationToken, includeUrl);
+
+    // Use short caching to speed up repeated list requests (10 seconds default).
+    const cached = getCache(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
 
     const params = { Bucket: S3_BUCKET, Prefix: prefix, MaxKeys: limit };
     if (continuationToken) params.ContinuationToken = continuationToken;
 
     const data = await S3.listObjectsV2(params).promise();
+
     const files = (data.Contents || [])
-      .filter((obj) => obj.Key !== "uploads/")
+      .filter((obj) => {
+        // filter out the folder placeholder
+        const key = obj.Key;
+        // exclude keys that equal the prefix itself
+        return key !== prefix;
+      })
       .map((obj) => {
         const key = obj.Key;
         let relative = key.startsWith("uploads/") ? key.slice("uploads/".length) : key;
         const parts = relative.split("/");
         let folder = "root";
         let name = relative;
-        if (parts.length > 1) { folder = parts[0]; name = parts.slice(1).join("/"); }
-        const signedUrl = makeSignedUrl(key);
-        return { name, key, size: obj.Size, lastModified: obj.LastModified, url: signedUrl, folder };
+        if (parts.length > 1) {
+          folder = parts[0];
+          name = parts.slice(1).join("/");
+        }
+        const fileMeta = {
+          name,
+          key,
+          size: obj.Size,
+          lastModified: obj.LastModified,
+          folder,
+          hasUrl: includeUrl ? true : false,
+        };
+        return fileMeta;
       });
 
-    res.json({ files, nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null });
+    // Optionally generate signed URLs only when includeUrl=true (use for small pages)
+    if (includeUrl && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        try {
+          files[i].url = makeSignedUrl(files[i].key);
+        } catch (e) {
+          files[i].url = null;
+        }
+      }
+    }
+
+    const response = { files, nextContinuationToken: data.IsTruncated ? data.NextContinuationToken : null };
+
+    // cache the response short-term (10 seconds). If you want a longer TTL set here.
+    setCache(cacheKey, response, 10);
+
+    res.json(response);
   } catch (err) {
     console.error("Error listing files:", err);
     res.status(500).json({ message: "Failed to list files", error: err.message });
@@ -288,7 +367,12 @@ app.delete("/files", apiAuthMiddleware, async (req, res) => {
     if (!S3_BUCKET) return res.status(500).json({ message: "S3 bucket not configured" });
     const { key } = req.body || {};
     if (!key) return res.status(400).json({ message: "Missing 'key' in request body" });
+
     await deleteObjectInBucket(key);
+
+    // invalidate cache after delete
+    listCache.clear();
+
     res.json({ message: "File deleted", key });
   } catch (err) {
     console.error("Error deleting file:", err);
@@ -331,6 +415,9 @@ app.put("/files/rename", apiAuthMiddleware, async (req, res) => {
     await copyObjectInBucket(key, newKey);
     await deleteObjectInBucket(key);
 
+    // invalidate cache after rename
+    listCache.clear();
+
     const signedUrl = makeSignedUrl(newKey);
 
     res.json({ message: "File renamed", file: { key: newKey, name: `${safeNewBase}${ext}`, folder, url: signedUrl } });
@@ -354,6 +441,9 @@ app.put("/files/move", apiAuthMiddleware, async (req, res) => {
 
     await copyObjectInBucket(key, newKey);
     await deleteObjectInBucket(key);
+
+    // invalidate cache after move
+    listCache.clear();
 
     const signedUrl = makeSignedUrl(newKey);
 
