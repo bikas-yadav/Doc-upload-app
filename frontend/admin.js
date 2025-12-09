@@ -37,7 +37,8 @@ const toastEl = document.getElementById("toast");
 // ---------- State ----------
 let files = [];
 let nextContinuationToken = null;
-let prevTokens = []; // stack of previous continuation tokens for Prev button
+let prevTokens = []; // stack of previous continuation tokens
+let currentContinuationToken = undefined; // current continuation token context
 let currentPrefix = "uploads/"; // not heavily used, but can be updated via folderFilter
 let currentFolder = "root";
 
@@ -81,6 +82,54 @@ function makeDownloadUrlForKey(key) {
   return `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`;
 }
 
+// ---------- Simple admin viewer (modal) ----------
+// Provides window.adminViewer.open(html) and .close() to preview files in a modal.
+// This ensures preview close works reliably without depending on page HTML.
+(function createAdminViewer() {
+  if (window.adminViewer) return;
+  const modal = document.createElement("div");
+  modal.id = "adminViewerModal";
+  modal.style.cssText = `
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(0,0,0,0.6);z-index:99999;padding:20px;
+  `;
+  const panel = document.createElement("div");
+  panel.style.cssText = `
+    background:#0b1220;color:#e5e7eb;border-radius:8px;max-width:96%;max-height:90%;
+    width:1000px;overflow:auto;position:relative;padding:12px;
+  `;
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.style.cssText = `
+    position:absolute;right:10px;top:10px;padding:6px 10px;border-radius:6px;background:#111827;color:#fff;border:none;cursor:pointer;z-index:100000;
+  `;
+  const content = document.createElement("div");
+  content.style.cssText = `padding-top:28px;min-height:320px;`;
+  panel.appendChild(closeBtn);
+  panel.appendChild(content);
+  modal.appendChild(panel);
+  document.body.appendChild(modal);
+
+  function open(html) {
+    content.innerHTML = html || "<div style='padding:20px'>No preview</div>";
+    modal.style.display = "flex";
+    // ensure close button has focus for quick keyboard close
+    closeBtn.focus();
+  }
+  function close() {
+    modal.style.display = "none";
+    content.innerHTML = "";
+  }
+
+  // close when clicking backdrop (not panel)
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+  closeBtn.addEventListener("click", close);
+
+  window.adminViewer = { open, close };
+})();
+
 // ---------- Auth ----------
 async function checkSession() {
   try {
@@ -101,23 +150,23 @@ async function checkSession() {
 }
 
 function showLogin() {
-  loginPage.classList.remove("hidden");
-  appRoot.classList.add("hidden");
-  loginMsg.textContent = "";
+  if (loginPage) loginPage.classList.remove("hidden");
+  if (appRoot) appRoot.classList.add("hidden");
+  if (loginMsg) loginMsg.textContent = "";
 }
 
 function showApp() {
-  loginPage.classList.add("hidden");
-  appRoot.classList.remove("hidden");
+  if (loginPage) loginPage.classList.add("hidden");
+  if (appRoot) appRoot.classList.remove("hidden");
 }
 
 // login form submit
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const token = (loginToken && loginToken.value || "").trim();
-    if (!token) {
-      loginMsg.textContent = "Please enter token";
+    const token = (loginToken && loginToken.value) || "";
+    if (!token.trim()) {
+      if (loginMsg) loginMsg.textContent = "Please enter token";
       return;
     }
     try {
@@ -125,21 +174,21 @@ if (loginForm) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: token.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
-        loginMsg.textContent = "";
-        loginToken.value = "";
+        if (loginMsg) loginMsg.textContent = "";
+        if (loginToken) loginToken.value = "";
         showApp();
         await loadFiles();
         showToast("Logged in ✅");
       } else {
-        loginMsg.textContent = data.message || "Invalid token";
+        if (loginMsg) loginMsg.textContent = data.message || "Invalid token";
       }
     } catch (err) {
       console.error("Login error", err);
-      loginMsg.textContent = "Login failed (network)";
+      if (loginMsg) loginMsg.textContent = "Login failed (network)";
     }
   });
 }
@@ -164,11 +213,16 @@ if (logoutBtn) {
 async function loadFiles(opts = {}) {
   // opts: { continuationToken, folder, limit }
   const limit = opts.limit || 50;
-  const continuationToken = opts.continuationToken || undefined;
+  const continuationToken = typeof opts.continuationToken !== "undefined" ? opts.continuationToken : undefined;
   const folder = opts.folder || (folderFilter && folderFilter.value) || undefined;
 
+  // update currentContinuationToken context (used for paging stack)
+  // if undefined (first load) keep it as undefined
+  // otherwise set to passed continuationToken
+  currentContinuationToken = continuationToken;
+
   // show loading state
-  filesTableBody.innerHTML = `<tr><td colspan="7">Loading…</td></tr>`;
+  if (filesTableBody) filesTableBody.innerHTML = `<tr><td colspan="7">Loading…</td></tr>`;
   try {
     let url = `${BACKEND_URL}/files?limit=${limit}`;
     if (typeof folder === "string" && folder !== "all" && folder !== "") {
@@ -190,32 +244,39 @@ async function loadFiles(opts = {}) {
     }));
     nextContinuationToken = data.nextContinuationToken || null;
 
-    // update prev tokens stack & buttons
+    // update prev tokens/buttons
     prevPageBtn.disabled = prevTokens.length === 0;
     nextPageBtn.disabled = !nextContinuationToken;
 
-    // render
     renderFilesTable();
   } catch (err) {
     console.error("Load files error", err);
-    filesTableBody.innerHTML = `<tr><td colspan="7">Failed to load files</td></tr>`;
+    if (filesTableBody) filesTableBody.innerHTML = `<tr><td colspan="7">Failed to load files</td></tr>`;
     showToast("Failed to load files");
   }
 }
 
 function renderFilesTable() {
   // update counts/folder
-  fileCountSpan.textContent = `${files.length}`;
+  if (fileCountSpan) fileCountSpan.textContent = `${files.length}`;
   if (currentFolderLabel) currentFolderLabel.textContent = currentFolder;
 
   if (!files.length) {
-    filesTableBody.innerHTML = `<tr><td colspan="7">No files found</td></tr>`;
+    if (filesTableBody) filesTableBody.innerHTML = `<tr><td colspan="7">No files found</td></tr>`;
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
     return;
   }
 
+  if (!filesTableBody) return;
+
   filesTableBody.innerHTML = files
     .map((file) => {
-      const previewHtml = file.type === "image" ? `<img src="${makeDownloadUrlForKey(file.key)}" alt="thumb" />` : (file.type === "pdf" ? "PDF" : "");
+      const previewHtml =
+        file.type === "image"
+          ? `<img src="${makeDownloadUrlForKey(file.key)}" alt="thumb" style="max-width:80px;max-height:60px;object-fit:cover" />`
+          : file.type === "pdf"
+          ? "PDF"
+          : "";
       return `
         <tr data-key="${file.key}">
           <td><input class="row-select" type="checkbox" data-key="${file.key}"></td>
@@ -252,7 +313,8 @@ function renderFilesTable() {
       const key = btn.dataset.key;
       if (!confirm("Delete this file?")) return;
       await deleteFile(key);
-      await loadFiles();
+      // after deletion, reload current page (preserve token)
+      await loadFiles({ continuationToken: currentContinuationToken });
     });
   });
 
@@ -260,46 +322,42 @@ function renderFilesTable() {
   const rowChecks = filesTableBody.querySelectorAll(".row-select");
   rowChecks.forEach((ch) => {
     ch.addEventListener("change", () => {
-      // update selectAll state
       const all = filesTableBody.querySelectorAll(".row-select");
       const checked = filesTableBody.querySelectorAll(".row-select:checked");
-      selectAllCheckbox.checked = all.length === checked.length && all.length > 0;
+      if (selectAllCheckbox) selectAllCheckbox.checked = all.length === checked.length && all.length > 0;
     });
   });
+
+  // ensure selectAll reflects current state
+  if (selectAllCheckbox) {
+    const all = filesTableBody.querySelectorAll(".row-select");
+    const checked = filesTableBody.querySelectorAll(".row-select:checked");
+    selectAllCheckbox.checked = all.length > 0 && all.length === checked.length;
+  }
 }
 
 // escape HTML for safety
 function escapeHtml(s) {
   if (!s) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ---------- Preview ----------
 function openPreview(key) {
-  // Use backend download redirect URL inside an iframe. The backend will redirect to signed S3 URL.
   const url = makeDownloadUrlForKey(key);
-
-  // For PDFs we embed an <iframe> directly; for images we also embed the file in an <img>.
   const type = (files.find((f) => f.key === key) || {}).type || "other";
   let html = "";
   if (type === "pdf") {
-    html = `<iframe src="${url}" title="PDF preview" style="width:100%;height:100%;border:0"></iframe>`;
+    html = `<iframe src="${url}" title="PDF preview" style="width:100%;height:70vh;border:0"></iframe>`;
   } else if (type === "image") {
-    html = `<img src="${url}" alt="image preview" style="max-width:100%;max-height:100%;display:block;margin:0 auto" />`;
+    html = `<img src="${url}" alt="image preview" style="max-width:100%;max-height:70vh;display:block;margin:0 auto" />`;
   } else {
-    html = `<div style="padding:20px;color:var(--muted)">Cannot preview this file type. <a href="${url}" target="_blank" rel="noopener noreferrer">Open file</a></div>`;
+    html = `<div style="padding:20px;color:#9ca3af">Cannot preview this file type. <a href="${url}" target="_blank" rel="noopener noreferrer">Open file</a></div>`;
   }
 
-  // Use the small viewer API exposed in the HTML
   if (window && window.adminViewer && typeof window.adminViewer.open === "function") {
     window.adminViewer.open(html);
   } else {
-    // fallback: open in new tab
     window.open(url, "_blank");
   }
 }
@@ -331,13 +389,11 @@ if (uploadForm) {
       showToast("Choose a file first");
       return;
     }
-    const folder = (uploadFolder && uploadFolder.value || "").trim();
+    const folder = (uploadFolder && uploadFolder.value) || "";
     await uploadSingleFile(file, folder);
-    // clear inputs
     uploadFile.value = "";
     uploadFolder.value = "";
-    // refresh list
-    await loadFiles();
+    await loadFiles({ continuationToken: currentContinuationToken });
   });
 }
 
@@ -379,9 +435,7 @@ if (selectAllCheckbox) {
 }
 
 function getSelectedKeys() {
-  return Array.from(filesTableBody.querySelectorAll(".row-select:checked")).map(
-    (el) => el.dataset.key
-  );
+  return Array.from(filesTableBody.querySelectorAll(".row-select:checked")).map((el) => el.dataset.key);
 }
 
 // ---------- Delete / Download selected ----------
@@ -395,11 +449,10 @@ if (deleteSelectedBtn) {
     if (!confirm(`Delete ${keys.length} file(s)?`)) return;
     for (const k of keys) {
       // sequential deletes to keep it simple
-      // you can parallelize if you prefer
       // eslint-disable-next-line no-await-in-loop
       await deleteFile(k);
     }
-    await loadFiles();
+    await loadFiles({ continuationToken: currentContinuationToken });
   });
 }
 
@@ -410,7 +463,6 @@ if (downloadSelectedBtn) {
       showToast("No files selected");
       return;
     }
-    // open each selected file in a new tab (backend redirects to signed S3 url)
     keys.forEach((k) => {
       const url = makeDownloadUrlForKey(k);
       window.open(url, "_blank");
@@ -419,22 +471,22 @@ if (downloadSelectedBtn) {
 }
 
 // ---------- Pagination ----------
+// Next: push currentContinuationToken to prevTokens, then load using nextContinuationToken
 if (nextPageBtn) {
   nextPageBtn.addEventListener("click", async () => {
     if (!nextContinuationToken) return;
-    // push current token to prev stack so Prev works
-    prevTokens.push(nextContinuationToken === null ? null : nextContinuationToken);
+    // push current token (could be undefined for first page)
+    prevTokens.push(currentContinuationToken);
     await loadFiles({ continuationToken: nextContinuationToken });
   });
 }
 
+// Prev: pop last token to restore previous context
 if (prevPageBtn) {
   prevPageBtn.addEventListener("click", async () => {
     if (prevTokens.length === 0) return;
-    // pop to get token for previous page context (we stored tokens on Next)
-    // simple approach: reload without token to go to start if stack becomes empty
-    prevTokens.pop(); // remove current
-    const prevToken = prevTokens.length ? prevTokens[prevTokens.length - 1] : undefined;
+    // pop the last stored token (this is the token for the previous page)
+    const prevToken = prevTokens.pop();
     await loadFiles({ continuationToken: prevToken });
   });
 }
@@ -442,15 +494,14 @@ if (prevPageBtn) {
 // folder filter / search refresh
 if (folderFilter) {
   folderFilter.addEventListener("change", () => {
-    // reset pagination
     prevTokens = [];
     nextContinuationToken = null;
+    currentContinuationToken = undefined;
     loadFiles({ folder: folderFilter.value });
   });
 }
 if (searchInput) {
   searchInput.addEventListener("input", () => {
-    // client-side search on the currently loaded page
     const q = (searchInput.value || "").toLowerCase().trim();
     if (!q) {
       renderFilesTable();
@@ -469,13 +520,14 @@ if (refreshBtn) {
   refreshBtn.addEventListener("click", async () => {
     prevTokens = [];
     nextContinuationToken = null;
+    currentContinuationToken = undefined;
     await loadFiles();
   });
 }
 
 // ---------- Utilities ----------
 window.addEventListener("error", (e) => {
-  // show less noisy message
+  // optionally show errors, currently silent
   // console.error("Global error", e);
 });
 
