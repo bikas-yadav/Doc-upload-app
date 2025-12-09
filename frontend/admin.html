@@ -1,14 +1,12 @@
 <!-- admin.html -->
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Study Drive — Admin</title>
   <link rel="stylesheet" href="admin.css" />
 </head>
-
 <body>
   <div class="app">
     <header class="topbar">
@@ -38,11 +36,6 @@
         <div class="panel small">
           <h3>Quick Actions</h3>
           <div class="row">
-            <input id="adminToken" placeholder="Enter Admin Token" />
-            <button id="applyToken">Set Token</button>
-            <button id="clearToken">Clear</button>
-          </div>
-          <div class="row">
             <button id="downloadSelected">Download Selected</button>
             <button id="deleteSelected">Delete Selected</button>
           </div>
@@ -60,8 +53,7 @@
       <section class="right">
         <div class="panel">
           <h3>Files</h3>
-          <div class="meta">Showing <span id="fileCount">0</span> files — Folder: <strong
-              id="currentFolder">root</strong></div>
+          <div class="meta">Showing <span id="fileCount">0</span> files — Folder: <strong id="currentFolder">root</strong></div>
           <table id="filesTable">
             <thead>
               <tr>
@@ -80,14 +72,14 @@
       </section>
     </main>
 
-    <div id="toast" class="toast hidden"></div>
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
     <!-- Viewer modal -->
-    <div id="viewerModal" class="modal hidden">
-      <div class="modal-inner">
+    <div id="viewerModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-inner" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
         <div class="modal-header">
           <div id="viewerTitle">Preview</div>
-          <button id="closeViewer">Close</button>
+          <button id="closeViewer" type="button">Close</button>
         </div>
         <div id="viewerBody" class="viewer-body"></div>
       </div>
@@ -108,5 +100,4 @@
     <script src="admin.js"></script>
   </div>
 </body>
-
 </html>
