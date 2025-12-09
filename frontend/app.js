@@ -1,45 +1,68 @@
 // ===== Config =====
-const BACKEND_URL = "https://doc-upload-app.onrender.com"; // change if needed
+const BACKEND_URL = "https://doc-upload-app.onrender.com"; // your backend
 
 // ===== DOM =====
+const form = document.getElementById("uploadForm");
+const statusDiv = document.getElementById("status");
 const fileListDiv = document.getElementById("fileList");
 const searchInput = document.getElementById("searchInput");
 const typeFilter = document.getElementById("typeFilter");
-const folderFilter = document.getElementById("folderFilter");
-const sortFilter = document.getElementById("sortFilter");
-
+const sortSelect = document.getElementById("sortSelect");
+const gridViewBtn = document.getElementById("gridViewBtn");
+const listViewBtn = document.getElementById("listViewBtn");
+const fileCountSpan = document.getElementById("fileCount");
+const totalSizeSpan = document.getElementById("totalSize");
+const totalSizeSidebarSpan = document.getElementById("totalSizeSidebar");
+const storageBarFill = document.getElementById("storageBarFill");
+const storagePercentLabel = document.getElementById("storagePercentLabel");
 const previewModal = document.getElementById("previewModal");
 const previewBody = document.getElementById("previewBody");
 const closePreviewBtn = document.getElementById("closePreviewBtn");
 const toast = document.getElementById("toast");
-
-// New UI elements
-const uploadBtn = document.getElementById("uploadBtn");
+const folderInput = document.getElementById("folderInput");
+const folderFilter = document.getElementById("folderFilter");
+const chips = document.querySelectorAll(".chip");
+const dropZone = document.getElementById("dropZone");
 const fileInput = document.getElementById("fileInput");
+const uploadQueue = document.getElementById("uploadQueue");
+const uploadQueueList = document.getElementById("uploadQueueList");
+const clearQueueBtn = document.getElementById("clearQueueBtn");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const navFavorites = document.getElementById("navFavorites");
+const detailsModal = document.getElementById("detailsModal");
+const detailsBody = document.getElementById("detailsBody");
+const closeDetailsBtn = document.getElementById("closeDetailsBtn");
 
-const newFolderBtn = document.getElementById("newFolderBtn");
-const folderModal = document.getElementById("folderModal");
-const folderNameInput = document.getElementById("folderNameInput");
-const closeFolderModalBtn = document.getElementById("closeFolderModalBtn");
-const createFolderConfirmBtn = document.getElementById("createFolderConfirmBtn");
+// 🔹 NEW: list under drop zone to show selected/dropped files
+const selectedFilesList = document.getElementById("selectedFilesList");
 
 // ===== State =====
 let allFiles = [];
+let viewMode = localStorage.getItem("studyDriveViewMode") || "grid";
+let activeChip = localStorage.getItem("studyDriveActiveChip") || "all";
+let favoriteKeys = loadFavorites();
+let currentDetailsFile = null;
 
 // ===== Helpers =====
+function loadFavorites() {
+  try {
+    const raw = localStorage.getItem("studyDriveFavorites");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites() {
+  localStorage.setItem("studyDriveFavorites", JSON.stringify(favoriteKeys));
+}
+
 function showToast(message) {
   if (!toast) return;
   toast.textContent = message;
   toast.classList.remove("hidden");
-  setTimeout(() => toast.classList.add("hidden"), 2200);
-}
-
-function detectType(name) {
-  const lower = (name || "").toLowerCase();
-  if (lower.endsWith(".pdf")) return "pdf";
-  if (lower.match(/\.(png|jpe?g|gif|webp|svg)$/)) return "image";
-  if (lower.match(/\.(docx?|pptx?|xlsx?)$/)) return "doc";
-  return "other";
+  setTimeout(() => toast.classList.add("hidden"), 2500);
 }
 
 function formatSize(bytes) {
@@ -59,33 +82,82 @@ function formatDate(dateStr) {
   return d.toLocaleString();
 }
 
-function getIconEmoji(type) {
+function detectType(name) {
+  const lower = (name || "").toLowerCase();
+  if (lower.endsWith(".pdf")) return "pdf";
+  if (lower.match(/\.(png|jpe?g|gif|webp|svg)$/)) return "image";
+  if (lower.match(/\.(docx?|pptx?|xlsx?)$/)) return "doc";
+  return "other";
+}
+
+function getIconText(type) {
   switch (type) {
     case "pdf":
-      return "📄";
+      return "PDF";
     case "image":
-      return "🖼️";
+      return "IMG";
     case "doc":
-      return "📝";
+      return "DOC";
     default:
-      return "📁";
+      return "FILE";
   }
 }
 
-// ===== Folder filter options =====
+function updateStats() {
+  const count = allFiles.length;
+  const totalBytes = allFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  const storageLimitBytes = 1024 * 1024 * 1024; // fake 1 GB limit
+
+  if (fileCountSpan) fileCountSpan.textContent = `${count}`;
+  if (totalSizeSpan) totalSizeSpan.textContent = formatSize(totalBytes) || "0 KB";
+  if (totalSizeSidebarSpan)
+    totalSizeSidebarSpan.textContent = formatSize(totalBytes) || "0 KB";
+
+  const percentage = Math.min(
+    100,
+    Math.round((totalBytes / storageLimitBytes) * 100)
+  );
+  if (storageBarFill) {
+    storageBarFill.style.width = `${percentage}%`;
+  }
+  if (storagePercentLabel) {
+    storagePercentLabel.textContent = `${percentage}%`;
+  }
+}
+
 function updateFolderFilterOptions() {
   if (!folderFilter) return;
   const folders = [...new Set(allFiles.map((f) => f.folder || "root"))].sort();
   folderFilter.innerHTML =
-    '<option value="all">All Folders</option>' +
+    '<option value="all">All folders</option>' +
     folders.map((f) => `<option value="${f}">${f}</option>`).join("");
 }
 
-// ===== Fetch files from backend (public, GET /files) =====
-async function loadFiles() {
+// 🔹 NEW: show list of selected / dropped files under drop zone
+function showSelectedFiles(filesList) {
+  if (!selectedFilesList) return;
+  const files = Array.from(filesList || []);
+  if (!files.length) {
+    selectedFilesList.innerHTML = "";
+    return;
+  }
+  selectedFilesList.innerHTML = files
+    .map((f) => `<li title="${f.name}">${f.name}</li>`)
+    .join("");
+}
+
+// ===== API: load/delete/download/rename/move =====
+async function loadFileList() {
   if (!fileListDiv) return;
 
-  fileListDiv.innerHTML = `<p class="loading">Loading files...</p>`;
+  fileListDiv.classList.add("file-list--loading");
+  fileListDiv.innerHTML = `
+    <div class="skeleton-list">
+      <div class="skeleton-item"></div>
+      <div class="skeleton-item"></div>
+      <div class="skeleton-item"></div>
+    </div>
+  `;
 
   try {
     const res = await fetch(`${BACKEND_URL}/files`);
@@ -108,33 +180,117 @@ async function loadFiles() {
     }));
 
     allFiles = files;
+    updateStats();
     updateFolderFilterOptions();
     renderFileList();
   } catch (err) {
-    console.error("Error loading files:", err);
+    console.error("Error loading file list:", err);
+    fileListDiv.classList.remove("file-list--loading");
     fileListDiv.innerHTML = `
-      <div class="public-message error">
-        ⚠️ Failed to load files. Please try again later.
+      <div class="file-list-error">
+        <span class="file-list-empty-icon">⚠️</span>
+        <div>Failed to load files from server.</div>
+        <div class="small">Check your backend URL or try again later.</div>
       </div>
     `;
   }
 }
 
-// ===== Filtering & sorting =====
+async function deleteFile(key) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/files`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key }),
+    });
+
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+
+    if (!res.ok) {
+      showToast(data.message || "Failed to delete file");
+      return;
+    }
+
+    favoriteKeys = favoriteKeys.filter((k) => k !== key);
+    saveFavorites();
+
+    showToast("File deleted ✅");
+    await loadFileList();
+  } catch (err) {
+    console.error("Delete error:", err);
+    showToast("Error deleting file");
+  }
+}
+
+async function handleDownload(key) {
+  try {
+    const url = `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`;
+    window.location.href = url;
+  } catch (err) {
+    console.error("Download error:", err);
+    showToast("Download failed");
+  }
+}
+
+async function renameFile(key, newName) {
+  const res = await fetch(`${BACKEND_URL}/files/rename`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ key, newName }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || "Rename failed");
+  }
+  return data.file;
+}
+
+async function moveFile(key, newFolder) {
+  const res = await fetch(`${BACKEND_URL}/files/move`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ key, newFolder }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || "Move failed");
+  }
+  return data.file;
+}
+
+// ===== Filtering / View =====
 function getFilteredFiles() {
   const query = (searchInput?.value || "").toLowerCase().trim();
-  const typeVal = typeFilter?.value || "all";
-  const folderVal = folderFilter?.value || "all";
-  const sortVal = sortFilter?.value || "newest";
+  const folder = folderFilter?.value || "all";
+  const sort = sortSelect?.value || "newest";
+  const chip = activeChip;
 
   let files = [...allFiles];
 
-  if (typeVal !== "all") {
-    files = files.filter((f) => f.type === typeVal);
+  if (chip === "pdf" || chip === "image" || chip === "doc") {
+    files = files.filter((f) => f.type === chip);
+  } else if (chip === "favorites") {
+    files = files.filter((f) => favoriteKeys.includes(f.key));
   }
 
-  if (folderVal !== "all") {
-    files = files.filter((f) => (f.folder || "root") === folderVal);
+  if (folder !== "all") {
+    files = files.filter((f) => (f.folder || "root") === folder);
+  }
+
+  if (typeFilter && typeFilter.value !== "all" && chip === "all") {
+    files = files.filter((f) => f.type === typeFilter.value);
   }
 
   if (query) {
@@ -151,7 +307,7 @@ function getFilteredFiles() {
     const na = (a.name || "").toLowerCase();
     const nb = (b.name || "").toLowerCase();
 
-    switch (sortVal) {
+    switch (sort) {
       case "oldest":
         return da - db;
       case "az":
@@ -171,25 +327,31 @@ function getFilteredFiles() {
   return files;
 }
 
-// ===== Render list =====
 function renderFileList() {
   if (!fileListDiv) return;
 
+  fileListDiv.classList.remove("file-list--loading");
+
   if (!allFiles.length) {
     fileListDiv.innerHTML = `
-      <div class="public-message empty">
-        📂 No files have been uploaded yet.
+      <div class="file-list-empty">
+        <span class="file-list-empty-icon">📂</span>
+        <div>No files uploaded yet.</div>
+        <div class="small">Upload your first note from the left panel.</div>
       </div>
     `;
     return;
   }
 
   const files = getFilteredFiles();
+  fileListDiv.className = `file-list ${viewMode}`;
 
   if (!files.length) {
     fileListDiv.innerHTML = `
-      <div class="public-message empty">
-        🔍 No files match your search/filters.
+      <div class="file-list-empty">
+        <span class="file-list-empty-icon">🔍</span>
+        <div>No files match your filters.</div>
+        <div class="small">Try clearing search or changing folder/type.</div>
       </div>
     `;
     return;
@@ -197,168 +359,268 @@ function renderFileList() {
 
   fileListDiv.innerHTML = files
     .map((file) => {
-      const type = file.type || "other";
-      const icon = getIconEmoji(type);
+      const typeClass = file.type || "other";
+      const iconText = getIconText(typeClass);
       const sizeText = formatSize(file.size);
       const dateText = formatDate(file.lastModified);
       const folderText = file.folder || "root";
+      const isFav = favoriteKeys.includes(file.key);
 
       return `
-        <div class="public-file-card" data-key="${file.key}" data-url="${file.url}" data-type="${type}">
-          <div class="public-file-main">
-            <div class="public-file-icon">${icon}</div>
-            <div>
-              <div class="public-file-name" title="${file.name || ""}">
-                ${file.name || "Untitled file"}
-              </div>
-              <div class="public-file-meta">
-                <span class="tag">${folderText}</span>
-                ${sizeText ? `<span>• ${sizeText}</span>` : ""}
-                ${dateText ? `<span>• ${dateText}</span>` : ""}
-              </div>
-            </div>
+        <div class="file-item" data-url="${file.url}" data-type="${typeClass}" data-key="${file.key}">
+          <div class="file-icon ${typeClass}">${iconText}</div>
+          <div class="file-main">
+            <p class="file-name" title="${file.name || ""}">
+              ${file.name || "Untitled file"}
+            </p>
+            <p class="file-meta">
+              [${folderText}] · ${sizeText || ""}${sizeText && dateText ? " · " : ""
+        }${dateText || ""}
+            </p>
           </div>
-          <div class="public-file-actions">
-            <button class="btn-small preview-btn" type="button">Preview</button>
-            <button class="btn-small secondary download-btn" type="button">Download</button>
+          <div class="file-actions">
+            <button type="button" class="favorite-btn ${isFav ? "is-favorite" : ""
+        }" title="Favorite">
+              ${isFav ? "★" : "☆"}
+            </button>
+            <button type="button" class="preview-btn">Preview</button>
+            <a href="${file.url}" target="_blank" rel="noopener noreferrer">Open</a>
+            <button type="button" class="download-btn">Download</button>
+            <button type="button" class="details-btn">Details</button>
+            <button type="button" class="delete-btn">Delete</button>
           </div>
         </div>
       `;
     })
     .join("");
 
-  // Attach events
-  fileListDiv.querySelectorAll(".public-file-card").forEach((card) => {
-    const key = card.getAttribute("data-key");
-    const url = card.getAttribute("data-url");
-    const type = card.getAttribute("data-type");
-    const previewBtn = card.querySelector(".preview-btn");
-    const downloadBtn = card.querySelector(".download-btn");
+  fileListDiv.querySelectorAll(".file-item").forEach((item) => {
+    const url = item.getAttribute("data-url");
+    const type = item.getAttribute("data-type");
+    const key = item.getAttribute("data-key");
+    const previewBtn = item.querySelector(".preview-btn");
+    const deleteBtn = item.querySelector(".delete-btn");
+    const favoriteBtn = item.querySelector(".favorite-btn");
+    const downloadBtn = item.querySelector(".download-btn");
+    const detailsBtn = item.querySelector(".details-btn");
 
-    if (previewBtn) {
-      previewBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openPreview(url, type);
-      });
-    }
+    previewBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openPreview(url, type);
+    });
 
-    if (downloadBtn) {
-      downloadBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        handleDownload(key);
-      });
-    }
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (confirm("Are you sure you want to delete this file?")) {
+        await deleteFile(key);
+      }
+    });
 
-    // Clicking the whole card also opens preview
-    card.addEventListener("click", () => {
+    favoriteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleFavorite(key, favoriteBtn);
+    });
+
+    downloadBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleDownload(key);
+    });
+
+    detailsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const file = allFiles.find((f) => f.key === key);
+      if (file) openDetails(file);
+    });
+
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".file-actions")) return;
       openPreview(url, type);
     });
   });
 }
 
-// ===== Download (public, GET /files/download) =====
-async function handleDownload(key) {
-  try {
-    const res = await fetch(
-      `${BACKEND_URL}/files/download?key=${encodeURIComponent(key)}`
-    );
-    const data = await res.json();
-    if (data && data.url) {
-      window.location.href = data.url;
-    } else {
-      showToast("Download link not available");
-    }
-  } catch (err) {
-    console.error("Download error:", err);
-    showToast("Download failed");
+function toggleFavorite(key, btn) {
+  if (favoriteKeys.includes(key)) {
+    favoriteKeys = favoriteKeys.filter((k) => k !== key);
+  } else {
+    favoriteKeys.push(key);
+  }
+  saveFavorites();
+  if (btn) {
+    const isFav = favoriteKeys.includes(key);
+    btn.classList.toggle("is-favorite", isFav);
+    btn.textContent = isFav ? "★" : "☆";
+  }
+  if (activeChip === "favorites") {
+    renderFileList();
   }
 }
 
-// ===== Upload files =====
-// NOTE: adjust endpoint/path if your backend uses something different.
-async function uploadFiles(files) {
-  if (!files || !files.length) return;
+// ===== Upload / Queue =====
+function ensureQueueVisible() {
+  if (!uploadQueue) return;
+  uploadQueue.classList.remove("hidden");
+}
+
+function addQueueItem(filename) {
+  ensureQueueVisible();
+  const el = document.createElement("div");
+  el.className = "queue-item";
+  el.innerHTML = `
+    <span class="queue-name" title="${filename}">${filename}</span>
+    <span class="queue-status uploading">Uploading...</span>
+  `;
+  uploadQueueList.appendChild(el);
+  return el;
+}
+
+function updateQueueItemStatus(el, status, kind) {
+  if (!el) return;
+  const statusSpan = el.querySelector(".queue-status");
+  statusSpan.textContent = status;
+  statusSpan.className = `queue-status ${kind}`;
+}
+
+async function uploadSingleFile(file, folder) {
+  const queueItemEl = addQueueItem(file.name);
 
   const formData = new FormData();
-  Array.from(files).forEach((file) => {
-    formData.append("files", file);
-  });
+  formData.append("document", file);
+  if (folder) {
+    formData.append("folder", folder);
+  }
 
   try {
-    showToast("Uploading...");
-    const res = await fetch(`${BACKEND_URL}/files`, {
+    const res = await fetch(`${BACKEND_URL}/upload`, {
       method: "POST",
       body: formData,
     });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.message || "Upload failed");
+    const rawText = await res.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { message: rawText };
     }
 
-    showToast("Upload complete");
-    await loadFiles();
+    if (!res.ok) {
+      updateQueueItemStatus(
+        queueItemEl,
+        data.message || "Failed",
+        "error"
+      );
+      showToast(`Upload failed: ${file.name}`);
+      return;
+    }
+
+    updateQueueItemStatus(queueItemEl, "Done ✅", "success");
   } catch (err) {
     console.error("Upload error:", err);
-    showToast("Upload failed");
+    updateQueueItemStatus(queueItemEl, "Error", "error");
+    showToast(`Upload error: ${file.name}`);
   }
 }
 
-// ===== New Folder =====
-// NOTE: adjust endpoint/body as per your API.
-async function createFolder(folderName) {
-  const trimmed = (folderName || "").trim();
-  if (!trimmed) {
-    showToast("Folder name cannot be empty");
+async function handleFilesSelected(filesList) {
+  const files = Array.from(filesList || []);
+  if (!files.length) return;
+
+  if (!statusDiv) return;
+
+  statusDiv.textContent = "";
+  statusDiv.className = "status-message";
+
+  const folder =
+    folderInput && folderInput.value.trim()
+      ? folderInput.value.trim()
+      : "";
+
+  statusDiv.textContent = `Uploading ${files.length} file(s)...`;
+
+  for (const file of files) {
+    await uploadSingleFile(file, folder);
+  }
+
+  statusDiv.textContent = "Upload(s) finished.";
+  statusDiv.classList.add("success");
+  showToast("Upload complete ✅");
+
+  if (fileInput) fileInput.value = "";
+
+  // 🔹 clear list under drop zone after upload
+  // showSelectedFiles([]);
+
+  await loadFileList();
+}
+
+async function handleUpload(e) {
+  e.preventDefault();
+  if (!fileInput || !fileInput.files.length) {
+    statusDiv.textContent = "Please choose at least one file first.";
+    statusDiv.className = "status-message error";
     return;
   }
+  await handleFilesSelected(fileInput.files);
+}
 
-  try {
-    const res = await fetch(`${BACKEND_URL}/folders`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: trimmed }),
+// ===== Drag & drop =====
+function setupDragAndDrop() {
+  if (!dropZone || !fileInput) return;
+
+  const highlight = () => dropZone.classList.add("dragover");
+  const unhighlight = () => dropZone.classList.remove("dragover");
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      highlight();
     });
+  });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.message || "Failed to create folder");
-    }
+  ["dragleave", "drop"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      unhighlight();
+    });
+  });
 
-    showToast("Folder created");
-    closeFolderModal();
-    await loadFiles();
-  } catch (err) {
-    console.error("Folder create error:", err);
-    showToast("Failed to create folder");
-  }
+  dropZone.addEventListener("drop", async (e) => {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+
+    // 🔹 show names in the list
+    showSelectedFiles(files);
+
+    // optional: sync to hidden file input so form submit sees them
+    const dataTransfer = new DataTransfer();
+    Array.from(files).forEach((f) => dataTransfer.items.add(f));
+    fileInput.files = dataTransfer.files;
+
+    // keep behaviour: auto-upload on drop
+    await handleFilesSelected(files);
+  });
 }
 
 // ===== Preview modal =====
 function openPreview(url, type) {
   if (!previewModal || !previewBody) {
-    if (url) window.open(url, "_blank");
+    window.open(url, "_blank");
     return;
   }
 
   previewBody.innerHTML = "";
 
-  if (!url) {
-    previewBody.innerHTML = `<p>No preview available.</p>`;
-  } else if (type === "pdf") {
-    previewBody.innerHTML = `
-      <iframe src="${url}" title="PDF preview"></iframe>
-    `;
+  if (type === "pdf") {
+    previewBody.innerHTML = `<iframe src="${url}" title="PDF preview"></iframe>`;
   } else if (type === "image") {
-    previewBody.innerHTML = `
-      <img src="${url}" alt="Image preview" />
-    `;
+    previewBody.innerHTML = `<img src="${url}" alt="Image preview" />`;
   } else {
     previewBody.innerHTML = `
-      <p>This file type cannot be previewed here.</p>
-      <p><a href="${url}" target="_blank" rel="noopener noreferrer">Open in new tab</a></p>
+      <p>This file type cannot be previewed here. You can open it in a new tab:</p>
+      <p><a href="${url}" target="_blank" rel="noopener noreferrer">Open file</a></p>
     `;
   }
 
@@ -371,25 +633,194 @@ function closePreview() {
   previewBody.innerHTML = "";
 }
 
-// ===== Folder modal helpers =====
-function openFolderModal() {
-  if (!folderModal || !folderNameInput) return;
-  folderNameInput.value = "";
-  folderModal.classList.remove("hidden");
-  folderNameInput.focus();
+// ===== Details modal (rename/move) =====
+function openDetails(file) {
+  currentDetailsFile = file;
+  if (!detailsModal || !detailsBody) return;
+
+  const sizeText = formatSize(file.size);
+  const dateText = formatDate(file.lastModified);
+  const typeText = file.type || detectType(file.name);
+
+  detailsBody.innerHTML = `
+    <h3 style="margin:0 0 8px;font-size:15px;">File details</h3>
+    <p style="font-size:12px;color:#9ca3af;margin:0 0 10px;">View and manage this file.</p>
+
+    <div style="font-size:13px;line-height:1.5;">
+      <div><strong>Name:</strong> ${file.name}</div>
+      <div><strong>Folder:</strong> ${file.folder || "root"}</div>
+      <div><strong>Type:</strong> ${typeText}</div>
+      <div><strong>Size:</strong> ${sizeText}</div>
+      <div><strong>Last modified:</strong> ${dateText}</div>
+      <div style="word-break:break-all;"><strong>Key:</strong> ${file.key}</div>
+    </div>
+
+    <hr style="margin:10px 0;border-color:#1f2937;" />
+
+    <div style="font-size:13px;display:flex;flex-direction:column;gap:8px;">
+      <div>
+        <label style="font-size:12px;display:block;margin-bottom:2px;">Rename</label>
+        <div style="display:flex;gap:6px;">
+          <input id="renameInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" value="${file.name.replace(/\.[^/.]+$/, "")}" />
+          <button id="renameBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#4f46e5;color:#e5e7eb;font-size:12px;cursor:pointer;">Save</button>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;display:block;margin-bottom:2px;">Move to folder</label>
+        <div style="display:flex;gap:6px;">
+          <input id="moveInput" type="text" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#e5e7eb;font-size:13px;" placeholder="e.g. semester-5, os" />
+          <button id="moveBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#10b981;color:#022c22;font-size:12px;cursor:pointer;">Move</button>
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;display:block;margin-bottom:2px;">Share / open link</label>
+        <div style="display:flex;gap:6px;">
+          <input id="linkInput" type="text" readonly style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid #4b5563;background:#020617;color:#9ca3af;font-size:12px;overflow:hidden;text-overflow:ellipsis;" value="${file.url}" />
+          <button id="copyLinkBtn" type="button" style="padding:6px 10px;border-radius:999px;border:none;background:#111827;color:#e5e7eb;font-size:12px;cursor:pointer;">Copy</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const renameInput = document.getElementById("renameInput");
+  const renameBtn = document.getElementById("renameBtn");
+  const moveInput = document.getElementById("moveInput");
+  const moveBtn = document.getElementById("moveBtn");
+  const copyLinkBtn = document.getElementById("copyLinkBtn");
+  const linkInput = document.getElementById("linkInput");
+
+  if (renameBtn && renameInput) {
+    renameBtn.addEventListener("click", async () => {
+      const base = renameInput.value.trim();
+      if (!base) {
+        showToast("Name cannot be empty");
+        return;
+      }
+      const extMatch = file.name.match(/\.[^/.]+$/);
+      const ext = extMatch ? extMatch[0] : "";
+      const newName = base + ext;
+      try {
+        const updated = await renameFile(file.key, newName);
+        showToast("File renamed ✅");
+        await loadFileList();
+        currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
+        closeDetails();
+      } catch (err) {
+        console.error("Rename error:", err);
+        showToast("Rename failed");
+      }
+    });
+  }
+
+  if (moveBtn && moveInput) {
+    moveBtn.addEventListener("click", async () => {
+      const newFolder = moveInput.value.trim();
+      if (!newFolder) {
+        showToast("Folder cannot be empty");
+        return;
+      }
+      try {
+        const updated = await moveFile(file.key, newFolder);
+        showToast("File moved ✅");
+        await loadFileList();
+        currentDetailsFile = allFiles.find((f) => f.key === updated.key) || null;
+        closeDetails();
+      } catch (err) {
+        console.error("Move error:", err);
+        showToast("Move failed");
+      }
+    });
+  }
+
+  if (copyLinkBtn && linkInput) {
+    copyLinkBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(linkInput.value);
+        showToast("Link copied 📋");
+      } catch {
+        linkInput.select();
+        showToast("Link ready to copy");
+      }
+    });
+  }
+
+  detailsModal.classList.remove("hidden");
 }
 
-function closeFolderModal() {
-  if (!folderModal) return;
-  folderModal.classList.add("hidden");
+function closeDetails() {
+  if (!detailsModal || !detailsBody) return;
+  detailsModal.classList.add("hidden");
+  detailsBody.innerHTML = "";
+  currentDetailsFile = null;
+}
+
+// ===== Sidebar & chips =====
+function toggleSidebar() {
+  if (!sidebar) return;
+  sidebar.classList.toggle("open");
+}
+
+function setActiveChip(name) {
+  activeChip = name;
+  localStorage.setItem("studyDriveActiveChip", activeChip);
+  chips.forEach((chip) => {
+    chip.classList.toggle("chip-active", chip.dataset.chip === activeChip);
+  });
+  renderFileList();
 }
 
 // ===== Init =====
 document.addEventListener("DOMContentLoaded", () => {
+  if (form) form.addEventListener("submit", handleUpload);
+
   if (searchInput) searchInput.addEventListener("input", renderFileList);
-  if (typeFilter) typeFilter.addEventListener("change", renderFileList);
+  if (sortSelect) sortSelect.addEventListener("change", renderFileList);
   if (folderFilter) folderFilter.addEventListener("change", renderFileList);
-  if (sortFilter) sortFilter.addEventListener("change", renderFileList);
+  if (typeFilter) typeFilter.addEventListener("change", renderFileList);
+
+  if (gridViewBtn && listViewBtn) {
+    const applyView = () => {
+      gridViewBtn.classList.toggle("active", viewMode === "grid");
+      listViewBtn.classList.toggle("active", viewMode === "list");
+      renderFileList();
+    };
+    gridViewBtn.addEventListener("click", () => {
+      viewMode = "grid";
+      localStorage.setItem("studyDriveViewMode", viewMode);
+      applyView();
+    });
+    listViewBtn.addEventListener("click", () => {
+      viewMode = "list";
+      localStorage.setItem("studyDriveViewMode", viewMode);
+      applyView();
+    });
+    applyView();
+  }
+
+  chips.forEach((chip) => {
+    chip.classList.toggle("chip-active", chip.dataset.chip === activeChip);
+    chip.addEventListener("click", () => {
+      setActiveChip(chip.dataset.chip);
+    });
+  });
+
+  if (clearQueueBtn && uploadQueue) {
+    clearQueueBtn.addEventListener("click", () => {
+      uploadQueueList.innerHTML = "";
+      uploadQueue.classList.add("hidden");
+    });
+  }
+
+  // 🔹 update list when user picks files via "browse"
+  if (fileInput) {
+    fileInput.addEventListener("change", () => {
+      showSelectedFiles(fileInput.files);
+    });
+  }
+
+  setupDragAndDrop();
 
   if (closePreviewBtn) {
     closePreviewBtn.addEventListener("click", closePreview);
@@ -405,47 +836,29 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Upload button -> trigger hidden file input
-  if (uploadBtn && fileInput) {
-    uploadBtn.addEventListener("click", () => fileInput.click());
+  if (closeDetailsBtn) {
+    closeDetailsBtn.addEventListener("click", closeDetails);
   }
-  if (fileInput) {
-    fileInput.addEventListener("change", (e) => {
-      uploadFiles(e.target.files);
-      e.target.value = ""; // reset input
-    });
-  }
-
-  // New folder button & modal
-  if (newFolderBtn) {
-    newFolderBtn.addEventListener("click", openFolderModal);
-  }
-  if (closeFolderModalBtn) {
-    closeFolderModalBtn.addEventListener("click", closeFolderModal);
-  }
-  if (folderModal) {
-    folderModal.addEventListener("click", (e) => {
+  if (detailsModal) {
+    detailsModal.addEventListener("click", (e) => {
       if (
-        e.target === folderModal ||
+        e.target === detailsModal ||
         e.target.classList.contains("modal-backdrop")
       ) {
-        closeFolderModal();
-      }
-    });
-  }
-  if (createFolderConfirmBtn) {
-    createFolderConfirmBtn.addEventListener("click", () => {
-      createFolder(folderNameInput.value);
-    });
-  }
-  if (folderNameInput) {
-    folderNameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        createFolder(folderNameInput.value);
+        closeDetails();
       }
     });
   }
 
-  loadFiles();
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener("click", toggleSidebar);
+  }
+
+  if (navFavorites) {
+    navFavorites.addEventListener("click", () => {
+      setActiveChip("favorites");
+      showToast("Showing favorite files ⭐");
+    });
+  }
+  loadFileList();
 });
