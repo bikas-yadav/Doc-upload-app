@@ -1,6 +1,7 @@
 // frontend/admin.js
 (function(){
   const API_BASE = window.API_BASE || location.origin;
+ const BACKEND_URL = "https://doc-upload-app.onrender.com";
 
   // login elements
   const loginPage = document.getElementById('loginPage');
@@ -77,7 +78,7 @@
   // login flow
   async function doLogin(token){
     try{
-      const res = await fetch(API_BASE + '/admin/auth', {
+      const res = await fetch(API_BASE + '${BACKEND_URL}/admin/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
