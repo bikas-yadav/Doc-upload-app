@@ -56,7 +56,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(compression());
-
+app.set("trust proxy", 1);
 // sessions
 app.use(
   session({
@@ -131,7 +131,7 @@ function requireLoggedInSession(req, res, next) {
 
 // If PROTECT_API is enabled, require session for write API endpoints
 function apiAuthMiddleware(req, res, next) {
-  if (PROTECT_API) return next();
+  if (!PROTECT_API) return next();
   return requireLoggedInSession(req, res, next);
 }
 
