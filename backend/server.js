@@ -230,13 +230,14 @@ function getCache(key) {
 
 app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, res) => {
   try {
-    const referer = req.headers.referer || "";
+const origin = req.headers.origin;
 
-    if (!referer.includes("/admin.html")) {
-      return res.status(403).json({
-        message: "Upload allowed only from admin panel",
-      });
-    }
+if (origin !== "https://bikashmydrive.netlify.app") {
+  return res.status(403).json({
+    message: "Upload allowed only from admin origin",
+  });
+}
+
 
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
