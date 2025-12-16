@@ -230,6 +230,14 @@ function getCache(key) {
 
 app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, res) => {
   try {
+    const referer = req.headers.referer || "";
+
+    if (!referer.includes("/admin")) {
+      return res.status(403).json({
+        message: "Upload allowed only from admin panel",
+      });
+    }
+
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
     const file = req.file;
