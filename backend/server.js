@@ -131,7 +131,7 @@ function requireLoggedInSession(req, res, next) {
 
 // If PROTECT_API is enabled, require session for write API endpoints
 function apiAuthMiddleware(req, res, next) {
-  if (!PROTECT_API) return next();
+  if (PROTECT_API) return next();
   return requireLoggedInSession(req, res, next);
 }
 
