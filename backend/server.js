@@ -232,7 +232,7 @@ app.post("/upload", apiAuthMiddleware, upload.single("document"), async (req, re
   try {
     const referer = req.headers.referer || "";
 
-    if (!referer.includes("/admin")) {
+    if (!referer.includes("/admin.html")) {
       return res.status(403).json({
         message: "Upload allowed only from admin panel",
       });
